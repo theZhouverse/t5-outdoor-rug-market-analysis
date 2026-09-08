@@ -55,6 +55,7 @@ function unesc(s) {
   return String(s).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
 }
 const REPORT_CUTOFF = data.analysisMonths.at(-1);
+const FORECAST_SCOPE = 'PP/plastic BSR Top100';
 
 // ============ Phase 1: 全部表格逐格比对 ============
 function parseTables(htmlText) {
@@ -184,8 +185,7 @@ function trendAnalysis(c, category, label) {
   if (top2026 && annual2026) out.push('- 2026.01-06 BSR前100贡献销量 ' + fmt(top2026.sales) + '（占同期' + fmt(top2026.sales / annual2026.sales * 100, 1) + '%），销售额占比 ' + fmt(top2026.revenue / annual2026.revenue * 100, 1) + '%；相对2025行代理池的销量/销售额方向变化为 ' + fmtPct(top2026.yoySales) + ' / ' + fmtPct(top2026.yoyRevenue) + '。');
   if (groupLine) out.push('- 2026.01-06头中尾分层：' + groupLine + '。');
   if (benchmark) {
-    const expected = category === 'overall' ? '（整体市场全量快照复核值约 -14.8% / -20.5%）' : '';
-    out.push('- ' + fmtMonth(benchmark.month) + '：月度MOM/环比按跨年同月口径（' + fmtMonth(benchmark.month) + ' vs ' + fmtMonth(benchmark.momBasis) + '）销量 ' + fmtPct(benchmark.momSales) + '、销售额 ' + fmtPct(benchmark.momRevenue) + expected + '。');
+    out.push('- ' + fmtMonth(benchmark.month) + '：月度MOM/环比按跨年同月口径（' + fmtMonth(benchmark.month) + ' vs ' + fmtMonth(benchmark.momBasis) + '）销量 ' + fmtPct(benchmark.momSales) + '、销售额 ' + fmtPct(benchmark.momRevenue) + '。');
   }
   if (baseline && baseline.month !== '202602') out.push('- 2026核心截止月 ' + fmtMonth(baseline.month) + '：月度MOM/环比按跨年同月口径（' + fmtMonth(baseline.month) + ' vs ' + fmtMonth(baseline.momBasis) + '）销量 ' + fmtPct(baseline.momSales) + '、销售额 ' + fmtPct(baseline.momRevenue) + '。');
   if (peak2026) out.push('- 2026.01-06核心月份中，' + fmtMonth(peak2026.month) + '销量最高，为 ' + fmt(peak2026.sales) + ' 件；该峰值用于安排2027旺季前4-8周的补货、广告与新品测试。');
@@ -222,7 +222,9 @@ let htmlNoCode = html.replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<script>
 htmlNoCode = htmlNoCode.replace(/<div class="trend-body">[\s\S]*?<\/div>/g, '');
 htmlNoCode = htmlNoCode.replace(/<section id="insights">[\s\S]*?<\/section>/g, '');
 const bodyNoTables = htmlNoCode.replace(/<table>[\s\S]*?<\/table>/g, '');
-const textOnly = bodyNoTables.replace(/<[^>]+>/g, ' ');
+// Hashes are provenance identifiers, not business numbers; remove them before
+// applying the numeric traceability scan.
+const textOnly = bodyNoTables.replace(/<[^>]+>/g, ' ').replace(/[0-9a-f]{64}/gi, '');
 const expectedSet = new Set();
 function addFmt(v) {
   if (v === null || v === undefined) return;
@@ -248,6 +250,17 @@ for (const f of Object.keys(data.insights || {})) if (typeof data.insights[f] ==
 for (const r of data.sourceDiagnostics || []) for (const f of Object.keys(r)) if (typeof r[f] === 'number') addFmt(r[f]);
 for (const r of data.overallMarketTrend2026 || []) for (const f of Object.keys(r)) if (typeof r[f] === 'number') addFmt(r[f]);
 for (const r of data.genimoTopProducts || []) for (const f of Object.keys(r)) if (typeof r[f] === 'number') addFmt(r[f]);
+for (const r of data.dataQuality.historicalParentDiagnostics || []) {
+  for (const f of Object.keys(r)) if (typeof r[f] === 'number') addFmt(r[f]);
+}
+for (const r of data.dataQuality.historicalBsrTop100Quality || []) {
+  for (const f of Object.keys(r)) if (typeof r[f] === 'number') addFmt(r[f]);
+}
+for (const cat of ['overall', 'pp', 'high', 'genimo']) {
+  for (const r of data.categories[cat].bsrTop100.quality || []) {
+    for (const f of Object.keys(r)) if (typeof r[f] === 'number') addFmt(r[f]);
+  }
+}
 for (const cat of ['overall', 'pp', 'high', 'genimo']) {
   const co = data.categories[cat] && data.categories[cat].cohort;
   if (co) for (const f of ['fromParents', 'toParents', 'retained', 'exited', 'entered']) if (typeof co[f] === 'number') addFmt(co[f]);
@@ -296,7 +309,7 @@ check('HTML 无 NaN/undefined/Infinity 等异常标记', badArtifacts.length ===
 // ============ Phase 4: 硬编码文本与数据一致性 ============
 const overall = data.categories.overall;
 const b202602 = overall.monthly.find((r) => r.month === '202602');
-check('全量快照复核文案与 JSON 一致', html.includes('整体市场全量快照复核值约 -14.8% / -20.5%')
+check('全量快照复核硬编码文案已移除且 JSON MOM 仍一致', !html.includes('整体市场全量快照复核值约')
   && Math.abs(b202602.momSales - (-14.8)) < 0.11 && Math.abs(b202602.momRevenue - (-20.5)) < 0.11
   && !Object.keys(b202602).some((key) => key.startsWith('chain')),
   'json=' + b202602.momSales.toFixed(1) + '/' + b202602.momRevenue.toFixed(1));

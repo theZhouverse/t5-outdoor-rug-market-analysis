@@ -141,6 +141,22 @@ function main() {
     }
     target.exec('COMMIT');
     target.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    // Replacement rows can grow the DB after the base importer recorded its
+    // size. Refresh the metadata after the final checkpoint so the reported
+    // artifact size identifies the actual post-replacement file.
+    if (tableExists(target, 'meta')) {
+      const metaId = target.prepare('SELECT MAX(id) AS id FROM meta').get().id;
+      if (metaId) {
+        let measuredSize = fs.statSync(TARGET_DB).size;
+        target.prepare('UPDATE meta SET db_size_bytes=? WHERE id=?').run(measuredSize, metaId);
+        target.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        const confirmedSize = fs.statSync(TARGET_DB).size;
+        if (confirmedSize !== measuredSize) {
+          target.prepare('UPDATE meta SET db_size_bytes=? WHERE id=?').run(confirmedSize, metaId);
+          target.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        }
+      }
+    }
   } catch (error) {
     try { target.exec('ROLLBACK'); } catch (_) { /* no-op */ }
     throw error;

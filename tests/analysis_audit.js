@@ -49,11 +49,31 @@ check('49 core analysis months', data.analysisMonths.length === 49, 'months=' + 
 check('seven replacement metadata rows', data.replacementMetadata.length === 7, 'rows=' + data.replacementMetadata.length);
 check('best-BSR enrichment covers 202601-202607', data.dataQuality.competitorDatabaseAvailable
   && data.dataQuality.bestBsrEnrichedMonths.length === 7);
+check('BSR enrichment is fail-closed for every required month',
+  data.dataQuality.requiredBsrEnrichmentMonths.join(',') === '202601,202602,202603,202604,202605,202606,202607'
+  && data.dataQuality.missingBsrEnrichmentMonths.length === 0);
+check('BSR parser documents integer and N.0 text handling',
+  data.dataQuality.bsrParser.includes('N.0') && data.dataQuality.bsrParser.includes('正整数'));
 check('historical BSR quality diagnostics cover all 43 pre-2026 months',
   data.dataQuality.historicalBsrTop100Quality.length === 43
   && data.dataQuality.historicalBsrTop100Quality.every((row) => row.month < '202601'
     && row.identifierCoveragePct === 100 && row.strictListingPool === false
     && Number.isFinite(row.distinctListingKeys) && Number.isFinite(row.duplicateListingRows)));
+check('historical parent sensitivity diagnostics expose 202505 duplication',
+  Array.isArray(data.dataQuality.historicalParentDiagnostics)
+  && data.dataQuality.historicalParentDiagnostics.length === 43
+  && data.dataQuality.historicalParentDiagnostics.some((row) => row.month === '202505'
+    && row.duplicateRows >= 600 && row.salesMaxVsRowPct < 0));
+check('BSR tie policy and tie diagnostics are disclosed',
+  data.dataQuality.top100TiePolicy.includes('并列')
+  && data.categories.overall.bsrTop100.quality.some((row) => row.month === '202606'
+    && row.maxRankTieCount >= 2));
+check('report timestamp is reproducible from source import batch',
+  data.generatedAt === data.sourceMeta.imported_at);
+check('main source provenance includes a SHA-256 identity',
+  data.sourceProvenance && data.sourceProvenance.sourceFile
+  && /^[0-9a-f]{64}$/.test(data.sourceProvenance.sourceSha256 || '')
+  && data.sourceProvenance.sourceSizeBytes === data.sourceMeta.source_size_bytes);
 check('merged 2026 overall trend covers Jan-Jul in order', data.overallMarketTrend2026.length === 7
   && data.overallMarketTrend2026.map((row) => row.month).join(',') === '202601,202602,202603,202604,202605,202606,202607');
 check('BSR multi-value audit preserves source and parsed rank', Array.isArray(data.dataQuality.bsrMultiValueAudit)
@@ -249,7 +269,9 @@ for (const [name, output] of [['Markdown', markdown], ['HTML', html]]) {
 }
 check('极速版包含核心结论与所有关键限制', quick.includes('户外地垫市场分析报告（极速版）')
   && quick.includes('2026.07仅94父体') && quick.includes('不是严格同口径同比')
-  && quick.includes('2022-2025 BSR Top100是源表行代理') && quick.includes('SKU平均标价排除空值'));
+  && quick.includes('2022-2025 BSR Top100是源表行代理') && quick.includes('SKU平均标价排除空值')
+  && quick.includes('N.0 文本') && quick.includes('字段语义确认前不自动改写')
+  && quick.includes('PP/plastic BSR Top100') && quick.includes('外部重算'));
 
 // 无对应数据（基准分层为空）披露校验：2025.05 源数据小类BSR重复 → 2026.05 中部/尾部 MOM 无基准
 const overallGroups = data.categories.overall.bsrGroups.monthly;
@@ -379,10 +401,25 @@ for (const [name, output] of [['Markdown', markdown], ['HTML', html]]) {
     && output.includes('卷边') && output.includes('破损'));
   check(name + ' identifies leadership reference provenance', output.includes('领导提供并确认通过'));
 }
+check('forecast provenance is explicit and rendered', data.forecastProvenance
+  && data.forecastProvenance.scope === 'PP/plastic BSR Top100'
+  && data.forecastProvenance.sourceSheet === '汇总'
+  && /^[0-9a-f]{64}$/.test(data.forecastProvenance.sourceSha256 || '')
+  && data.forecastProvenance.sourceCells.forecast2027Monthly === 'R2:T13'
+  && markdown.includes('PP/plastic BSR Top100')
+  && html.includes('PP/plastic BSR Top100'));
 check('forecast parameters are explicit and rendered', Array.isArray(data.forecastParameters)
   && data.forecastParameters.length === 4
   && data.forecastParameters.every((row) => row.parameter && row.defaultValue && row.effect)
-  && markdown.includes('预测可调整参数') && html.includes('可调整参数'));
+  && markdown.includes('预测参数说明（静态假设，需外部重算）')
+  && html.includes('预测参数说明（静态假设，需外部重算）')
+  && markdown.includes('本报告不提供交互式重算')
+  && html.includes('本报告不提供交互式重算'));
+check('GENIMO recommendation does not use cross-year growth as quantitative baseline',
+  markdown.includes('不作为定量增量基线')
+  && html.includes('不作为定量增量基线')
+  && !markdown.includes('2027扩量必须同步约束毛利、TACOS和库存覆盖。')
+  && !html.includes('2027扩量必须同步约束毛利、TACOS和库存覆盖。'));
 check('quick report contains packaging small-batch validation gate', /300-500\s*单/.test(quick)
   && (quick.includes('包边') || quick.includes('边缘处理'))
   && quick.includes('卷边') && quick.includes('破损'));
@@ -394,6 +431,12 @@ check('HTML exposes 43-row historical BSR quality table', html.includes('2022-20
   && html.includes('含ASIN标识的行级/变体展开')
   && data.dataQuality.historicalBsrTop100Quality.length === 43);
 check('HTML has exactly one coverage navigation entry', (html.match(/href="#coverage"/g) || []).length === 1);
+check('generated report removes hard-coded benchmark wording',
+  !markdown.includes('整体市场全量快照复核值约') && !html.includes('整体市场全量快照复核值约'));
+const dbFileSize = fs.statSync(DB_PATH).size;
+check('meta db_size_bytes matches the post-replacement database file',
+  Number(data.sourceMeta.db_size_bytes) === dbFileSize,
+  `meta=${data.sourceMeta.db_size_bytes} file=${dbFileSize}`);
 
 console.log('\n========== ANALYSIS AUDIT ==========');
 console.log('Checks: ' + checks);
