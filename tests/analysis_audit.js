@@ -165,6 +165,44 @@ for (const month of data.analysisMonths) {
 check('overall average list price excludes missing/non-numeric prices and reconciles to DB',
   priceAveragesReconcile && missingPriceRows > 0, 'missingExcluded=' + missingPriceRows);
 
+// Missing sales/revenue must remain visible in the analysis layer.  The
+// weighted price is recomputed only from rows where both source values exist.
+let missingMetricReconciles = true;
+let coreMissingSales = 0;
+let coreMissingRevenue = 0;
+let coreMetricRows = 0;
+for (const month of data.analysisMonths.filter((value) => value >= '202601' && value <= '202606')) {
+  const rows = db.prepare('SELECT 月销量 sales, 月销售额 revenue FROM monthly_' + month).all();
+  const missingSales = rows.filter((row) => row.sales === null || row.sales === '').length;
+  const missingRevenue = rows.filter((row) => row.revenue === null || row.revenue === '').length;
+  const paired = rows.filter((row) => row.sales !== null && row.sales !== '' && row.revenue !== null && row.revenue !== ''
+    && Number.isFinite(Number(row.sales)) && Number.isFinite(Number(row.revenue)));
+  const pairedSales = paired.reduce((sum, row) => sum + Number(row.sales), 0);
+  const pairedRevenue = paired.reduce((sum, row) => sum + Number(row.revenue), 0);
+  const actual = data.categories.overall.monthly.find((row) => row.month === month);
+  coreMetricRows += rows.length;
+  coreMissingSales += missingSales;
+  coreMissingRevenue += missingRevenue;
+  if (!actual || actual.missingSalesCount !== missingSales || actual.missingRevenueCount !== missingRevenue
+    || !close(actual.weightedPrice, pairedSales ? pairedRevenue / pairedSales : null)
+    || actual.weightedPriceComplete !== (paired.length === rows.length)) {
+    missingMetricReconciles = false;
+    break;
+  }
+}
+check('missing sales/revenue counts and paired weighted price reconcile to DB',
+  missingMetricReconciles && data.insights.coreOverallMetricRows === coreMetricRows
+    && data.insights.coreOverallMissingSalesRows === coreMissingSales
+    && data.insights.coreOverallMissingRevenueRows === coreMissingRevenue
+    && coreMissingSales === 18 && coreMissingRevenue === 36,
+  `rows=${coreMetricRows} missingSales=${coreMissingSales} missingRevenue=${coreMissingRevenue}`);
+check('BSR definition records restored rich-text identifiers and paired price policy',
+  !data.definitions.bsrTop100.includes('ASIN/父ASIN are absent')
+    && data.definitions.weightedPrice.includes('配对销售额')
+    && data.dataQuality.missingValuePolicy.includes('覆盖率')
+    && markdown.includes('加权成交均价仅按同时具备销量和销售额的记录计算')
+    && html.includes('加权成交均价仅按同时具备销量和销售额的记录计算'));
+
 const overall = byMonth(data.categories.overall.monthly);
 const pp = byMonth(data.categories.pp.monthly);
 const high = byMonth(data.categories.high.monthly);
