@@ -69,7 +69,11 @@ const detailEnd=detailValues.length+2;
 const aggEnd=aggValues.length+2;
 const wb=XLSX.utils.book_new();
 const qsheet=name=>"'"+name+"'";
-const cell=(f,v)=>({f:f,v:v===undefined||v===null?'':v});
+// Keep formula caches typed.  SheetJS defaults formula cells to t="str" even
+// when the cached result is numeric; that makes downstream previews and
+// readers treat calculated values as text until Excel recalculates.  Explicit
+// numeric typing preserves the cached result while keeping the formula live.
+const cell=(f,v)=>{const value=v===undefined||v===null?'':v;return{f:f,v:value,t:typeof value==='number'&&Number.isFinite(value)?'n':'s'};};
 const numOrNull=v=>v===null||v===undefined||Number.isNaN(v)?null:Number(v);
 const aggMap=new Map(aggs.map(r=>[r.month+'|'+r.scope+'|'+r.tier,r]));
 const metricCol={raw:'E',list:'F',dup:'G',sales:'H',revenue:'I',priceSum:'J',priceCount:'K',pairedSales:'L',pairedRevenue:'M',salesValid:'N',revenueValid:'O',pairedCount:'P'};
@@ -384,9 +388,18 @@ setAutofilter(ws14,'AD',profitTotal-1);
 // add formula columns for H1 achievement and July execution status.
 const planRefWb=XLSX.default.readFile(path.join(ROOT,'新增参考的材料和内容','销量预测计划部底表-户外地垫.xlsx'),{cellFormula:false,cellNF:false});
 const planRefRows=XLSX.utils.sheet_to_json(planRefWb.Sheets['26年实际销量'],{header:1,defval:''});
-const planHeaders=[...(planRefRows[0]||[]),'1-6月实际合计','H1达成率','7月计划差额','执行状态'];
+// The source sheet is physically stored from column B and may expose a blank
+// leading column through SheetJS.  Drop that layout-only gutter so the copied
+// business header starts at A, matching the reference table's visible header.
+const planHeaderOffset=(planRefRows[0]?.[0]===''&&planRefRows[0].slice(1).some(v=>String(v).trim()!==''))?1:0;
+const planSourceRows=planRefRows.map(row=>planHeaderOffset?row.slice(planHeaderOffset):row);
+const planHeaders=[...(planSourceRows[0]||[]),'1-6月实际合计','H1达成率','7月计划差额','执行状态'];
+const planNum=v=>{if(v===null||v===undefined||v==='')return null;if(typeof v==='number'&&Number.isFinite(v))return v;const s=String(v).trim().replaceAll(',','');if(!s)return null;if(s.endsWith('%')){const p=Number(s.slice(0,-1));return Number.isFinite(p)?p/100:null;}const x=Number(s);return Number.isFinite(x)?x:null;};
+const planCol=name=>planHeaders.findIndex(v=>String(v).trim()===name);
+const planMonthCols=['1月实际达成','2月实际达成','3月实际达成','4月实际达成','5月实际达成','6月实际达成'].map(planCol);
+const planTargetCol=planCol('2026年'),planJulyActualCol=planCol('7月实际达成'),planJulyPlanCol=planCol('7月');
 const planSheetRows=[['计划部经营计划与实际周报底表'],['表头与经营字段参照：销量预测计划部底表-户外地垫.xlsx / 26年实际销量；新增列由本表公式计算。'],[],planHeaders];
-for(const raw of planRefRows.slice(1)){if(!raw.some(v=>v!==''&&v!==null&&v!==undefined))continue;const row=planSheetRows.length+1;const sourceVals=raw.map(v=>typeof v==='string'&&/^#(DIV\/0!|VALUE!|N\/A|REF!)/.test(v)?null:v);const vals=[...sourceVals,cell('SUM(Q'+row+':V'+row+')',null),cell('IFERROR(AH'+row+'/P'+row+',"")',null),cell('IF(OR(W'+row+'="",X'+row+'=""),"",W'+row+'-X'+row+')',null),cell('IF(P'+row+'="","待补年度目标",IF(AI'+row+'>=1,"H1达成",IF(AND(X'+row+'<>"",W'+row+'=""),"待补7月实际","跟进")))',null)];planSheetRows.push(vals);}
+for(const raw of planSourceRows.slice(1)){if(!raw.some(v=>v!==''&&v!==null&&v!==undefined))continue;const row=planSheetRows.length+1;const sourceVals=raw.map(v=>typeof v==='string'&&/^#(DIV\/0!|VALUE!|N\/A|REF!)/.test(v)?null:v);const target=planNum(raw[planTargetCol]),h1=planMonthCols.reduce((s,c)=>s+(planNum(raw[c])??0),0),h1Rate=target?h1/target:null,julyActual=planNum(raw[planJulyActualCol]),julyPlan=planNum(raw[planJulyPlanCol]);const statusVal=target===null?'待补年度目标':h1Rate!==null&&h1Rate>=1?'H1达成':julyPlan!==null&&julyActual===null?'待补7月实际':'跟进';const vals=[...sourceVals,cell('SUM(Q'+row+':V'+row+')',h1),cell('IFERROR(AH'+row+'/P'+row+',"")',h1Rate),cell('IF(OR(W'+row+'="",X'+row+'=""),"",W'+row+'-X'+row+')',julyActual!==null&&julyPlan!==null?julyActual-julyPlan:null),cell('IF(P'+row+'="","待补年度目标",IF(AI'+row+'>=1,"H1达成",IF(AND(X'+row+'<>"",W'+row+'=""),"待补7月实际","跟进")))',statusVal)];planSheetRows.push(vals);}
 const ws15=addSheet('15_经营计划与实际',planSheetRows,[14,12,20,12,14,20,15,28,12,20,12,16,14,12,12,14,16,16,16,16,16,16,16,12,12,12,12,12,12,14,14,14,34,16,12,16,16],[[0,0,0,36],[1,0,1,36]]);
 setAutofilter(ws15,'AK',planSheetRows.length);
 
@@ -398,7 +411,7 @@ const rulesRows=[['来源、数据操作和规则登记'],[],['项目','当前�
  ['去重逻辑','父ASIN优先，缺省时用ASIN；每月组内选最小可解析BSR，若并列选指标更完整行，再选最小源行ID','本次生成脚本；与src/build_competitor_db.js规则对齐','所有月份结果先形成父ASIN/ASIN代表记录；原始行数、去重行数同时保留','否','90页Listing键、原始行数、去重行数','这是统计单元选择，不删除raw记录','结果可追溯源行'],
  ['BSR解析与Top100','完整数字/带逗号/允许N.0；多值取最小正整数；每个范围每月最多100','market.db与competitor_809440.db','按overall、PP、非PP、GENIMO分别形成独立Top100池；分层不跨池','否','90页BSR列；02/05/08、03/06/09页','GENIMO是品牌镜头，不参与PP+非PP加总',''],
  ['五档边界说明','原文标签写作1-5、5-10、10-20、20-50、50-100；为避免边界重复，结果表按不重叠区间1-5、6-10、11-20、21-50、51-100统计','原始要求文字 + 本次交付设计','各Listing只进入一个五档，五档销量/销售额可加总回勾Top100；若外部展示使用重叠标签，禁止直接相加','否','03/06/09细分层区块','这是展示边界解释，不改变BSR原始名次',''],
- ['分类定义','PP=标题含完整单词plastic；非PP=整体排除PP的补集；GENIMO=品牌字段等于GENIMO','原始标题/品牌字段 + 2026同父体变体补充','整体、PP、非PP为互补市场分区；GENIMO独立作为品牌份额与进退层视角','否','01/04/07、10页','非PP高客单不是价格阈值，按需求定义为排除PP后的产品线',''],
+ ['分类定义','PP=同一Listing组内任一子体标题含完整单词plastic；非PP=整体排除PP的补集；GENIMO=品牌字段等于GENIMO','原始标题/品牌字段 + 同父体变体补充','先按父ASIN优先的Listing组归并，再以组内任一子体标题命中plastic判定PP；整体、PP、非PP为互补市场分区；GENIMO独立作为品牌份额与进退层视角','否','01/04/07、10页','非PP高客单不是价格阈值，按需求定义为排除PP后的产品线；混合标题父体的PP判定保留在90页原始行/代表行和本规则页可追溯',''],
  ['销量/销售额/均价','销量和销售额分别汇总；平均标价=有效价格合计/有效价格数；加权成交均价=配对销售额/配对销量','原始月销量、月销售额、价格字段','公式页从91_聚合输入计算；缺失值不按0进入分母','否','01/02/03等结果页','平均标价与成交均价不能混称客单价',''],
  ['MOM与YOY','MOM=当前月 vs 上一自然月；YOY=当前月 vs 去年同月','原始需求与说明文件；本次明确拆列','每个范围、Top100、分层和GENIMO均分别提供MOM/YOY；2026.07留空增速','否','月度、BSR、分层、品牌份额页','首月缺基准时留空',''],
  ['年度与核心周期','2024全年、2025全年、2025H1、2026H1；2026.01-06为核心，2026.07只展示','原始需求、SPEC','年度表和H1表均用公式引用91页','否','各月度/Top100页年度区块','不静默延长核心窗口',''],
