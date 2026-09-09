@@ -8,7 +8,7 @@
 
 - **目的**: 把 44 MB 的多 sheet Excel 文件（50 张月度明细 + 4 张 TOP 汇总）无损导入到 SQLite, 便于后续 BI / 二次分析。
 - **数据源**: `data/raw/地垫-卖家精灵市场数据.xlsx` (卖家精灵市场数据, 美国站, 2022.06 - 2026.07)
-- **输出**: `data/processed/market.db` (单文件 SQLite, ~48 MB)
+- **输出**: `data/processed/market.db` (单文件 SQLite, ~48 MB)；领导验收结果工作簿 `outputs/20260909-formula-market-analysis/户外地垫市场分析-公式版-20260909.xlsx`
 - **工作表口径**: Excel 界面可见 23 张；工作簿内部另有 32 张隐藏表（31 张历史月度明细 + 1 张无有效区域的遗留 `Sheet6`）
 - **规模**: 主 Excel 基础导入 73,812 条；应用 2026.01-07 竞品代表行后当前为 71,451 条，54 张业务表（50 月度 + 4 TOP）+ meta/sheet_catalog/analysis_replacements 元数据
 - **2026 口径（2026-09-08 审计更新）**: 2026.01-06 竞品快照为**全市场父体级导出**（每月 1,038-1,993 个父体），2025 则为包含 ASIN/父ASIN 富文本标识的行级导出（含变体行）。两者统计单元不同，跨年数值只作方向性参考，不构成严格同口径同比；2026.07 的 94 父体小样本只展示规模，禁止计算同比、环比和累计。销量/销售额空值保留为缺失，已知值合计不把空值当业务零值；加权成交均价仅按同时具备销量和销售额的记录计算并提供覆盖率。BSR 支持数值、整数文本和 `N.0` 文本，非零小数按缺失处理；2026.01-07 缺少竞品名次增强时分析直接失败；并列名次保留，分层数量可能超过区间宽度。2025 父体重复只做敏感性诊断，未获业务确认前不自动选择首行或最大值。趋势结论与 GENIMO 量化建议统一使用 2026.01-06 实绩。竞品库可由 `src/build_competitor_db.js` 确定性重建。
@@ -35,7 +35,8 @@
 │   ├── import_xlsx.js                   # 主 Excel 基础导入
 │   ├── build_competitor_db.js           # 竞品快照 -> competitor_809440.db（raw + dedup，可复跑）
 │   ├── apply_competitor_2026.js         # 2026.01-07 父体代表行确定性重放
-│   └── analyze_market.js                # JSON / Markdown / HTML 分析生成
+│   ├── analyze_market.js                # JSON / Markdown / HTML 分析生成
+│   └── build_formula_market_xlsx.mjs    # 结果 XLSX 生成器（需 bundled Node + artifact-tool）
 ├── sandbox/
 │   └── test_xlsx.js           # PoC (验证 xlsx 能读取)
 ├── tests/
@@ -46,6 +47,9 @@
 │   ├── frontend_audit.js                # HTML表格/图表/文本数字逐项溯源
 │   └── overwrite_guard.js               # 覆盖保护
 ├── 交付/                                # 优化版HTML/Markdown、极速版、数据JSON
+├── outputs/20260909-formula-market-analysis/
+│   ├── 户外地垫市场分析-公式版-20260909.xlsx # 结果与公式集中在一份工作簿
+│   └── 00_概览-预览.png                # 概览页视觉抽查
 ├── tmp/                       # 临时文件 (可随时清空)
 └── node_modules/              # 依赖 (gitignore)
 ```
@@ -68,6 +72,14 @@ npm run analyze
 # 5. 一次运行全部数据、分析和覆盖保护验收
 npm test
 ```
+
+### 3.1 领导验收结果工作簿
+
+`outputs/20260909-formula-market-analysis/户外地垫市场分析-公式版-20260909.xlsx` 是当前建议给领导验收的单一文件。`00_概览` 先给出整体市场、PP、高客单非PP、GENIMO 份额和 BSR Top100；`01-05` 展开月度、分类、Top100、头中尾和品牌份额；`06_决策建议` 将增长方向联动到行动提示；`07_核心汇总` 和 `08_校验` 负责核心周期和数学回勾；`90_输入_明细` 保留 2025.01-12 与 2026.01-07 的值，`91_聚合输入` 保留同一规则产生的中间聚合，`92_来源与规则` 说明数据操作。
+
+结果页的销量、销售额、均价、覆盖率、MOM/环比、份额、BSR 分层和校验均为 Excel 公式。当前工作簿包含 31,874 条明细、399 条聚合记录和 3,625 个公式；公式重算后的整体=PP+高客单非PP差额（销量/销售额）均为 0。MOM/环比仍按当前月对去年同月，2026.01-06 是核心周期，2026.07 只作展示。计划部 BI `+2.8106%` 与计划部 BSR `+5.0910%` 在概览页单独列为参考，不能替换 market.db 的统计单元和负向明细轨迹。
+
+如需重建该文件，使用工作区配置的 bundled Node 运行 `src/build_formula_market_xlsx.mjs`；脚本先读取 `market.db` 与 `competitor_809440.db`，再按当前去重/分类/BSR规则生成 90 明细和 91 聚合，最后由结果页公式完成计算。不会修改 `data/raw/` 或写回数据库。
 
 ## 4. DB Schema 概览
 
