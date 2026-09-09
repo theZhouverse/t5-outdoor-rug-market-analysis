@@ -42,8 +42,11 @@ function listingKey(row) {
 
 function parseBsr(value) {
   if (value === null || value === undefined || value === '') return null;
-  const matches = String(value).match(/\d[\d,]*/g) || [];
-  const ranks = matches.map((item) => Number(item.replace(/,/g, ''))).filter(Number.isFinite);
+  // Match integer ranks and zero-only decimals (for example "591.0").
+  // Reject non-zero decimals instead of splitting "1.5" into ranks 1 and 5.
+  const matches = String(value).match(/(?<![\d.,])\d[\d,]*(?:\.0+)?(?![\d.])/g) || [];
+  const ranks = matches.map((item) => Number(item.replace(/,/g, '')))
+    .filter((rank) => Number.isFinite(rank) && Number.isInteger(rank) && rank > 0);
   return ranks.length ? Math.min(...ranks) : null;
 }
 

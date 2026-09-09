@@ -69,7 +69,10 @@ function parseBsr(value) {
   // BSR exports may store integer ranks as either 1 or the text "1.0";
   // consume the optional zero-only decimal as part of the same token so it
   // cannot be split into an accidental second rank of 0.
-  const matches = String(value).match(/\d[\d,]*(?:\.0+)?/g) || [];
+  // Keep integer tokens and optional zero-only decimals, but do not split a
+  // non-zero decimal such as "1.5" into the false ranks 1 and 5. The
+  // lookarounds also keep comma-grouped values and newline-separated ranks.
+  const matches = String(value).match(/(?<![\d.,])\d[\d,]*(?:\.0+)?(?![\d.])/g) || [];
   const ranks = matches.map((s) => Number(s.replace(/,/g, '')))
     .filter((rank) => Number.isFinite(rank) && Number.isInteger(rank) && rank > 0);
   return { rank: ranks.length ? Math.min(...ranks) : null, multi: ranks.length > 1 };
