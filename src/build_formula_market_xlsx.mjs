@@ -1,191 +1,310 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { SpreadsheetFile, Workbook } from '@oai/artifact-tool';
+import * as XLSX from 'xlsx';
 
-const ROOT = path.resolve('.');
-const DB_PATH = path.resolve(ROOT, 'data/processed/market.db');
-const COMP_DB_PATH = path.resolve(ROOT, 'data/processed/competitor_809440.db');
-const JSON_PATH = path.resolve(ROOT, '交付/户外地垫市场分析数据.json');
-const OUT_DIR = path.resolve(ROOT, 'outputs/20260909-formula-market-analysis');
-const OUT_PATH = path.join(OUT_DIR, '户外地垫市场分析-公式版-20260909.xlsx');
-const PREVIEW_PATH = path.join(OUT_DIR, '00_概览-预览.png');
-const PLASTIC_WORD_RE = /\bplastic\b/i;
-const CATEGORIES = ['overall', 'pp', 'high', 'genimo'];
-const CATEGORY_LABELS = { overall: '整体市场', pp: 'PP/Plastic', high: '高客单非PP', genimo: 'GENIMO' };
-const TIERS = [
-  { key: '头部（1-20）', min: 1, max: 20 },
-  { key: '中部（21-50）', min: 21, max: 50 },
-  { key: '尾部（51-100）', min: 51, max: 100 },
+const ROOT=path.resolve('.');
+const DB=path.join(ROOT,'data/processed/market.db');
+const CDB=path.join(ROOT,'data/processed/competitor_809440.db');
+const JSON_FILE=path.join(ROOT,'交付/户外地垫市场分析数据.json');
+const OUT_DIR=path.join(ROOT,'outputs/20260909-formula-market-analysis');
+const OUT=path.join(OUT_DIR,'户外地垫市场分析-公式版-20260909.xlsx');
+const PREVIEW=path.join(OUT_DIR,'00_总览-预览.png');
+const q=x=>'"'+String(x).replaceAll('"','""')+'"',txt=x=>x==null?'':String(x),n=x=>x!==null&&x!==undefined&&x!==''&&Number.isFinite(Number(x))?Number(x):null;
+const plastic=/\bplastic\b/i,CORE_A='202601',CORE_B='202606',SHOW_A='202501',SHOW_B='202607';
+const scopes=[['overall','整体市场（PP+非PP）',r=>true],['pp','PP管/Plastic',r=>r.pp],['nonpp','非PP高客单产品线',r=>!r.pp],['genimo','GENIMO品牌',r=>r.genimo]];
+const coarse=[['头部（1-20）',1,20],['中部（21-50）',21,50],['尾部（51-100）',51,100]];
+const fine=[['1-5',1,5],['6-10',6,10],['11-20',11,20],['21-50',21,50],['51-100',51,100]];
+const parseBsr=v=>{if(v==null||v==='')return null;const a=(String(v).match(/(?<![\d.,])\d[\d,]*(?:\.0+)?(?![\d.])/g)||[]).map(x=>Number(x.replaceAll(',',''))).filter(x=>Number.isInteger(x)&&x>0);return a.length?Math.min(...a):null};
+const keyOf=r=>txt(r.parent).trim()||txt(r.asin).trim();
+const better=(a,b)=>{if(!b)return true;const ar=a.rank??Infinity,br=b.rank??Infinity;return ar<br||(ar===br&&(a.complete>b.complete||(a.complete===b.complete&&a.rowId<b.rowId)))};
+const prevMonth=m=>{const d=new Date(Date.UTC(Number(m.slice(0,4)),Number(m.slice(4))-2,1));return String(d.getUTCFullYear())+String(d.getUTCMonth()+1).padStart(2,'0')};
+const prevYear=m=>String(Number(m.slice(0,4))-1)+m.slice(4);
+const status=m=>m==='202607'?'展示样本（94父体）':(m>=CORE_A&&m<=CORE_B?'核心':'历史基线');
+const source=m=>m>='202601'&&m<='202607'?'2026竞品替换链':'主源工作簿';
+const total=(a,f)=>a.reduce((s,r)=>s+(f(r)??0),0);
+
+const db=new DatabaseSync(DB,{readOnly:true}),cdb=new DatabaseSync(CDB,{readOnly:true});
+const sourceMonths=db.prepare("SELECT target_table FROM sheet_catalog WHERE classification='monthly' ORDER BY sheet_order").all().map(x=>String(x.target_table).replace('monthly_','')).filter(x=>/^\d{6}$/.test(x));
+const months=sourceMonths.filter(x=>x>='202301'&&x<=SHOW_B),display=months.filter(x=>x>=SHOW_A);
+const profiles=new Map();
+for(const m of sourceMonths.filter(x=>x>='202601'&&x<='202607')){
+ const t='raw_'+m,pm=new Map();if(!cdb.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t))throw new Error('missing '+t);
+ for(const r of cdb.prepare('SELECT row_id,ASIN asin,"父ASIN" parent,品牌 brand,"商品标题" title,"小类BSR" bsr FROM '+q(t)).all()){
+  const k=keyOf(r);if(!k)continue;const p=pm.get(k)||{pp:false,genimo:false,r:{overall:null,pp:null,nonpp:null,genimo:null}},rank=parseBsr(r.bsr),pp=plastic.test(txt(r.title)),g=txt(r.brand).trim().toLowerCase()==='genimo';p.pp||=pp;p.genimo||=g;
+  for(const pair of [['overall',true],['pp',pp],['nonpp',!pp],['genimo',g]])if(pair[1]&&rank!==null&&(p.r[pair[0]]===null||rank<p.r[pair[0]]))p.r[pair[0]]=rank;
+  pm.set(k,p);
+ }
+ profiles.set(m,pm);
+}
+const details=[];
+for(const m of months){
+ const rows=db.prepare('SELECT row_id,ASIN asin,SKU sku,"父ASIN" parent,品牌 brand,"商品标题" title,"小类BSR" bsr,"月销量" sales,"月销售额" revenue,价格 price FROM '+q('monthly_'+m)).all(),groups=new Map();
+ for(const r of rows){const k=keyOf(r);if(!k)continue;const rank=parseBsr(r.bsr),complete=Number(n(r.sales)!==null)+Number(n(r.revenue)!==null),g=groups.get(k)||{key:k,raw:0,pp:false,genimo:false,rank:null,rep:null};g.raw++;g.pp||=plastic.test(txt(r.title));g.genimo||=txt(r.brand).trim().toLowerCase()==='genimo';const c={rowId:Number(r.row_id),row:r,rank,complete};if(better(c,g.rep)){g.rep=c;g.rank=rank}groups.set(k,g)}
+ const pm=profiles.get(m);for(const g of groups.values()){const r=g.rep.row,p=pm?.get(g.key),pp=p?.pp??g.pp,genimo=p?.genimo??g.genimo;details.push({month:m,key:g.key,asin:txt(r.asin).trim(),parent:txt(r.parent).trim(),sku:txt(r.sku).trim(),brand:txt(r.brand).trim(),title:txt(r.title).trim(),pp,genimo,sales:n(r.sales),revenue:n(r.revenue),price:n(r.price),rankOverall:p?.r?.overall??g.rank,rankPP:p?.r?.pp??(pp?g.rank:null),rankNonPP:p?.r?.nonpp??(!pp?g.rank:null),rankGenimo:p?.r?.genimo??(genimo?g.rank:null),raw:g.raw,dup:g.raw-1,sourceRow:Number(r.row_id),source:source(m),status:status(m),sv:n(r.sales)!==null?1:0,rv:n(r.revenue)!==null?1:0,pv:n(r.price)!==null?1:0,paired:n(r.sales)!==null&&n(r.revenue)!==null?1:0,core:m>=CORE_A&&m<=CORE_B?1:0,july:m==='202607'?1:0,topOverall:0,topPP:0,topNonPP:0,topGenimo:0})}}
+const byMonth=new Map(months.map(m=>[m,details.filter(r=>r.month===m)])),rankFor=(r,s)=>s==='overall'?r.rankOverall:s==='pp'?r.rankPP:s==='nonpp'?r.rankNonPP:r.rankGenimo,topBy=new Map();
+for(const m of months)for(const [s,,fn] of scopes){const top=(byMonth.get(m)||[]).filter(r=>fn(r)&&Number.isInteger(rankFor(r,s))&&rankFor(r,s)>=1&&rankFor(r,s)<=100).sort((a,b)=>rankFor(a,s)-rankFor(b,s)||a.key.localeCompare(b.key)||a.sourceRow-b.sourceRow).slice(0,100);topBy.set(m+'|'+s,top);const f=s==='overall'?'topOverall':s==='pp'?'topPP':s==='nonpp'?'topNonPP':'topGenimo';top.forEach(r=>r[f]=1)}
+const stats=rs=>{const sv=rs.filter(r=>r.sv),rv=rs.filter(r=>r.rv),pv=rs.filter(r=>r.pv),pr=rs.filter(r=>r.paired);return{raw:total(rs,r=>r.raw),list:rs.length,dup:total(rs,r=>r.dup),sales:total(sv,r=>r.sales),revenue:total(rv,r=>r.revenue),priceSum:total(pv,r=>r.price),priceCount:pv.length,pairedSales:total(pr,r=>r.sales),pairedRevenue:total(pr,r=>r.revenue),salesValid:sv.length,revenueValid:rv.length,pairedCount:pr.length}};
+const aggs=[],add=(m,s,t,rs)=>aggs.push({month:m,scope:s,tier:t,...stats(rs),source:source(m),status:status(m)});
+for(const m of months){const rs=byMonth.get(m)||[];for(const [s,,fn] of scopes){const base=rs.filter(fn),top=topBy.get(m+'|'+s)||[];add(m,s,'全部',base);add(m,s,'Top100',top);for(const [t,a,b] of [...coarse,...fine])add(m,s,t,top.filter(r=>{const z=rankFor(r,s);return z>=a&&z<=b}))}add(m,'genimo_pp','全部',rs.filter(r=>r.genimo&&r.pp))}
+
+
+
+const benchmarkData=JSON.parse(await fs.readFile(JSON_FILE,'utf8'));
+const benchmark=benchmarkData.leadershipBenchmark||{};
+const detailHeaders=['月份','Listing键','代表ASIN','父ASIN','SKU','品牌','代表标题','PP标记','非PP标记','GENIMO标记','月销量','月销售额','价格','整体BSR','PP BSR','非PP BSR','GENIMO BSR','原始行数','去重行数','销量有效','销售额有效','价格有效','配对有效','源行ID','来源','状态','核心标记','2026.07展示标记','整体Top100','PP Top100','非PP Top100','GENIMO Top100'];
+const detailValues=details.map(r=>[r.month,r.key,r.asin||null,r.parent||null,r.sku||null,r.brand||null,r.title||null,r.pp?1:0,r.pp?0:1,r.genimo?1:0,r.sales,r.revenue,r.price,r.rankOverall,r.rankPP,r.rankNonPP,r.rankGenimo,r.raw,r.dup,r.sv,r.rv,r.pv,r.paired,r.sourceRow,r.source,r.status,r.core,r.july,r.topOverall,r.topPP,r.topNonPP,r.topGenimo]);
+const aggValues=aggs.map(r=>[r.month,r.scope,scopes.find(x=>x[0]===r.scope)?.[1]||r.scope,r.tier,r.raw,r.list,r.dup,r.sales,r.revenue,r.priceSum,r.priceCount,r.pairedSales,r.pairedRevenue,r.salesValid,r.revenueValid,r.pairedCount,r.source,r.status]);
+const detailEnd=detailValues.length+2;
+const aggEnd=aggValues.length+2;
+const wb=XLSX.utils.book_new();
+const qsheet=name=>"'"+name+"'";
+const cell=(f,v)=>({f:f,v:v===undefined?null:v});
+const numOrNull=v=>v===null||v===undefined||Number.isNaN(v)?null:Number(v);
+const aggMap=new Map(aggs.map(r=>[r.month+'|'+r.scope+'|'+r.tier,r]));
+const metricCol={raw:'E',list:'F',dup:'G',sales:'H',revenue:'I',priceSum:'J',priceCount:'K',pairedSales:'L',pairedRevenue:'M',salesValid:'N',revenueValid:'O',pairedCount:'P'};
+const getAgg=(m,s,t)=>aggMap.get(m+'|'+s+'|'+t)||{raw:0,list:0,dup:0,sales:0,revenue:0,priceSum:0,priceCount:0,pairedSales:0,pairedRevenue:0,salesValid:0,revenueValid:0,pairedCount:0};
+const sumCache=(metric,s,t,a,b)=>months.filter(m=>m>=a&&m<=b).reduce((z,m)=>z+(Number(getAgg(m,s,t)[metric])||0),0);
+const avgCache=(s,t,m)=>{const r=getAgg(m,s,t);return r.priceCount? r.priceSum/r.priceCount:null};
+const weightedCache=(s,t,m)=>{const r=getAgg(m,s,t);return r.pairedSales? r.pairedRevenue/r.pairedSales:null};
+const periodAvg=(s,t,a,b)=>{const ps=sumCache('priceSum',s,t,a,b),pc=sumCache('priceCount',s,t,a,b);return pc?ps/pc:null};
+const periodWeighted=(s,t,a,b)=>{const ps=sumCache('pairedRevenue',s,t,a,b),pc=sumCache('pairedSales',s,t,a,b);return pc?ps/pc:null};
+const rate=(a,b)=>b? a/b-1:null;
+const prevM=prevMonth,prevY=prevYear;
+const aggRangeEnd=aggEnd;
+const aggRange={A:"'91_聚合输入'!$A$3:$A$"+aggRangeEnd,B:"'91_聚合输入'!$B$3:$B$"+aggRangeEnd,D:"'91_聚合输入'!$D$3:$D$"+aggRangeEnd};
+function sf(metric,s,t,m){const c=metricCol[metric];return "SUMIFS('91_聚合输入'!$"+c+"$3:$"+c+"$"+aggRangeEnd+","+aggRange.A+",\""+m+"\","+aggRange.B+",\""+s+"\","+aggRange.D+",\""+t+"\")";}
+function sfr(metric,s,t,a,b){const c=metricCol[metric];return "SUMIFS('91_聚合输入'!$"+c+"$3:$"+c+"$"+aggRangeEnd+","+aggRange.A+",\">="+a+"\","+aggRange.A+",\"<="+b+"\","+aggRange.B+",\""+s+"\","+aggRange.D+",\""+t+"\")";}
+function addSheet(name,rows,widthsList,merges=[]){const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=widthsList.map(w=>({wch:w}));if(merges.length)ws['!merges']=merges.map(x=>({s:{r:x[0],c:x[1]},e:{r:x[2],c:x[3]}}));XLSX.utils.book_append_sheet(wb,ws,name);return ws;}
+function setAutofilter(ws,endCol,endRow){ws['!autofilter']={ref:'A4:'+endCol+endRow};}
+const allDetails=details;
+const detailRows90=[['原始明细输入（值）· 一行代表一个父ASIN/ASIN确定性代表记录'],detailHeaders,...detailValues];
+const ws90=addSheet('90_输入_明细',detailRows90,[11,20,15,15,16,15,60,9,10,11,13,15,12,11,10,11,13,12,12,11,12,11,11,10,20,18,12,18,12,11,12,14],[[0,0,0,31]]);
+setAutofilter(ws90,'AF',detailRows90.length);
+const aggRows91=[['聚合输入（脚本按明细确定性汇总，结果页全部用Excel公式引用本页）'],['月份','范围键','范围','层级','原始行数','独立Listing','去重行数','销量','销售额','价格合计','价格有效数','配对销量','配对销售额','销量有效数','销售额有效数','配对有效数','来源','状态'],...aggValues];
+const ws91=addSheet('91_聚合输入',aggRows91,[11,13,25,16,12,14,12,14,16,14,12,14,16,14,15,13,20,18],[[0,0,0,17]]);
+
+
+const periods=[['2024全年','202401','202412'],['2025全年','202501','202512'],['2025H1','202501','202506'],['2026H1','202601','202606']];
+function avgFormula(s,t,m){return 'IFERROR('+sf('priceSum',s,t,m)+'/'+sf('priceCount',s,t,m)+',"")';}
+function weightedFormula(s,t,m){return 'IFERROR('+sf('pairedRevenue',s,t,m)+'/'+sf('pairedSales',s,t,m)+',"")';}
+function periodAvgFormula(s,t,a,b){return 'IFERROR('+sfr('priceSum',s,t,a,b)+'/'+sfr('priceCount',s,t,a,b)+',"")';}
+function periodWeightedFormula(s,t,a,b){return 'IFERROR('+sfr('pairedRevenue',s,t,a,b)+'/'+sfr('pairedSales',s,t,a,b)+',"")';}
+function rateFormula(cur,base){return 'IFERROR(('+cur+')/('+base+')-1,"")';}
+function monthlyRows(scopeKey){
+ const rows=[[''],[''],[],['月份','范围状态','原始行数','独立Listing','去重行数','销量','销量有效','销量缺失','销售额','销售额有效','销售额缺失','平均标价','加权成交均价','配对覆盖率','MOM销量','MOM销售额','MOM平均标价','YOY销量','YOY销售额','YOY平均标价','备注']];
+ rows[0]=[scopes.find(s=>s[0]===scopeKey)[1]+' · 月度与年度分析（公式页）'];
+ rows[1]=['MOM/环比=当前月 vs 上一自然月；YOY/同比=当前月 vs 去年同月。2026.07仅展示，两个增速留空。'];
+ for(const m of display){
+  const pm=prevM(m),py=prevY(m),show=m===SHOW_B;
+  const sales=sf('sales',scopeKey,'全部',m),rev=sf('revenue',scopeKey,'全部',m),price=avgFormula(scopeKey,'全部',m);
+  const sv=sf('salesValid',scopeKey,'全部',m),rv=sf('revenueValid',scopeKey,'全部',m);
+  const row=[m,m===SHOW_B?'展示':(m>=CORE_A&&m<=CORE_B?'核心':'历史基线'),
+   cell(sf('raw',scopeKey,'全部',m),getAgg(m,scopeKey,'全部').raw),
+   cell(sf('list',scopeKey,'全部',m),getAgg(m,scopeKey,'全部').list),
+   cell(sf('dup',scopeKey,'全部',m),getAgg(m,scopeKey,'全部').dup),
+   cell(sales,getAgg(m,scopeKey,'全部').sales),
+   cell(sv,getAgg(m,scopeKey,'全部').salesValid),
+   cell('D'+(rows.length+1)+'-G'+(rows.length+1),getAgg(m,scopeKey,'全部').raw-getAgg(m,scopeKey,'全部').salesValid),
+   cell(rev,getAgg(m,scopeKey,'全部').revenue),
+   cell(rv,getAgg(m,scopeKey,'全部').revenueValid),
+   cell('D'+(rows.length+1)+'-J'+(rows.length+1),getAgg(m,scopeKey,'全部').raw-getAgg(m,scopeKey,'全部').revenueValid),
+   cell(price,avgCache(scopeKey,'全部',m)),
+   cell(weightedFormula(scopeKey,'全部',m),weightedCache(scopeKey,'全部',m)),
+   cell('IFERROR('+sf('pairedCount',scopeKey,'全部',m)+'/'+sf('list',scopeKey,'全部',m)+',"")',getAgg(m,scopeKey,'全部').list?getAgg(m,scopeKey,'全部').pairedCount/getAgg(m,scopeKey,'全部').list:null),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sales,sf('sales',scopeKey,'全部',pm)),rate(getAgg(m,scopeKey,'全部').sales,getAgg(pm,scopeKey,'全部').sales)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(rev,sf('revenue',scopeKey,'全部',pm)),rate(getAgg(m,scopeKey,'全部').revenue,getAgg(pm,scopeKey,'全部').revenue)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(price,avgFormula(scopeKey,'全部',pm)),rate(avgCache(scopeKey,'全部',m),avgCache(scopeKey,'全部',pm))),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sales,sf('sales',scopeKey,'全部',py)),rate(getAgg(m,scopeKey,'全部').sales,getAgg(py,scopeKey,'全部').sales)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(rev,sf('revenue',scopeKey,'全部',py)),rate(getAgg(m,scopeKey,'全部').revenue,getAgg(py,scopeKey,'全部').revenue)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(price,avgFormula(scopeKey,'全部',py)),rate(avgCache(scopeKey,'全部',m),avgCache(scopeKey,'全部',py))),
+   show?'展示样本：不纳入核心增速':'公式引用91_聚合输入；缺失值不按0进入有效分母'];
+  rows.push(row);
+ }
+ return rows;
+}
+function writeMonthlySheet(scopeKey,name){
+ const rows=monthlyRows(scopeKey);rows.push([]);
+ const annualHeaderRow=rows.length+1;rows.push(['年度/周期','范围','原始行数','独立Listing','去重行数','销量','销售额','平均标价','加权成交均价','销量有效','销售额有效']);
+ const annualStart=rows.length+1;
+ for(const p of periods){const label=p[0],a=p[1],b=p[2];rows.push([label,a+'-'+b,
+  cell(sfr('raw',scopeKey,'全部',a,b),sumCache('raw',scopeKey,'全部',a,b)),
+  cell(sfr('list',scopeKey,'全部',a,b),sumCache('list',scopeKey,'全部',a,b)),
+  cell(sfr('dup',scopeKey,'全部',a,b),sumCache('dup',scopeKey,'全部',a,b)),
+  cell(sfr('sales',scopeKey,'全部',a,b),sumCache('sales',scopeKey,'全部',a,b)),
+  cell(sfr('revenue',scopeKey,'全部',a,b),sumCache('revenue',scopeKey,'全部',a,b)),
+  cell(periodAvgFormula(scopeKey,'全部',a,b),periodAvg(scopeKey,'全部',a,b)),
+  cell(periodWeightedFormula(scopeKey,'全部',a,b),periodWeighted(scopeKey,'全部',a,b)),
+  cell(sfr('salesValid',scopeKey,'全部',a,b),sumCache('salesValid',scopeKey,'全部',a,b)),
+  cell(sfr('revenueValid',scopeKey,'全部',a,b),sumCache('revenueValid',scopeKey,'全部',a,b))]);}
+ rows.push(['说明','2025H1与2026H1用于核心对比；2024全年和2025全年保留年度基线。']);
+ const ws=addSheet(name,rows,[14,16,14,15,14,14,12,12,15,14,14,14,16,13,13,14,15,13,13,14,45],[[0,0,0,20]]);
+ return {sheet:name,annualStart,annualEnd:annualStart+periods.length-1,monthlyStart:5,monthlyEnd:4+display.length};
+}
+function topRows(scopeKey){
+ const rows=[[''],[''],[],['月份','范围状态','Top100 Listing','原始行数','去重行数','销量','销量有效','销售额','销售额有效','平均标价','加权成交均价','配对覆盖率','MOM销量','MOM销售额','MOM平均标价','YOY销量','YOY销售额','YOY平均标价','备注']];
+ rows[0]=[scopes.find(s=>s[0]===scopeKey)[1]+' · BSR前100分析（公式页）'];
+ rows[1]=['每月按对应范围独立取BSR 1-100，最多100个独立Listing；Top100统计与月度分析使用相同去重后的代表记录。'];
+ for(const m of display){const pm=prevM(m),py=prevY(m),show=m===SHOW_B;const sales=sf('sales',scopeKey,'Top100',m),rev=sf('revenue',scopeKey,'Top100',m),price=avgFormula(scopeKey,'Top100',m),r=getAgg(m,scopeKey,'Top100');
+  rows.push([m,m===SHOW_B?'展示':(m>=CORE_A&&m<=CORE_B?'核心':'历史基线'),
+   cell(sf('list',scopeKey,'Top100',m),r.list),cell(sf('raw',scopeKey,'Top100',m),r.raw),cell(sf('dup',scopeKey,'Top100',m),r.dup),
+   cell(sales,r.sales),cell(sf('salesValid',scopeKey,'Top100',m),r.salesValid),cell(rev,r.revenue),cell(sf('revenueValid',scopeKey,'Top100',m),r.revenueValid),
+   cell(price,avgCache(scopeKey,'Top100',m)),cell(weightedFormula(scopeKey,'Top100',m),weightedCache(scopeKey,'Top100',m)),
+   cell('IFERROR('+sf('pairedCount',scopeKey,'Top100',m)+'/'+sf('list',scopeKey,'Top100',m)+',"")',r.list?r.pairedCount/r.list:null),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sales,sf('sales',scopeKey,'Top100',pm)),rate(r.sales,getAgg(pm,scopeKey,'Top100').sales)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(rev,sf('revenue',scopeKey,'Top100',pm)),rate(r.revenue,getAgg(pm,scopeKey,'Top100').revenue)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(price,avgFormula(scopeKey,'Top100',pm)),rate(avgCache(scopeKey,'Top100',m),avgCache(scopeKey,'Top100',pm))),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sales,sf('sales',scopeKey,'Top100',py)),rate(r.sales,getAgg(py,scopeKey,'Top100').sales)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(rev,sf('revenue',scopeKey,'Top100',py)),rate(r.revenue,getAgg(py,scopeKey,'Top100').revenue)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(price,avgFormula(scopeKey,'Top100',py)),rate(avgCache(scopeKey,'Top100',m),avgCache(scopeKey,'Top100',py))),
+   show?'展示样本：不纳入核心增速':'Top100池按独立代表记录截取']);}
+ return rows;
+}
+function writeTopSheet(scopeKey,name){
+ const rows=topRows(scopeKey);rows.push([]);rows.push(['年度/周期','范围','Top100 Listing累计','销量','销售额','平均标价','加权成交均价','销量变化','销售额变化']);
+ const annualStart=rows.length+1;
+ for(const p of periods){const label=p[0],a=p[1],b=p[2];rows.push([label,a+'-'+b,cell(sfr('list',scopeKey,'Top100',a,b),sumCache('list',scopeKey,'Top100',a,b)),cell(sfr('sales',scopeKey,'Top100',a,b),sumCache('sales',scopeKey,'Top100',a,b)),cell(sfr('revenue',scopeKey,'Top100',a,b),sumCache('revenue',scopeKey,'Top100',a,b)),cell(periodAvgFormula(scopeKey,'Top100',a,b),periodAvg(scopeKey,'Top100',a,b)),cell(periodWeightedFormula(scopeKey,'Top100',a,b),periodWeighted(scopeKey,'Top100',a,b)),null,null]);}
+ const ws=addSheet(name,rows,[14,16,16,14,16,14,16,14,14,14,16,13,13,13,14,13,13,14,38],[[0,0,0,18]]);
+ return {sheet:name,annualStart,annualEnd:annualStart+periods.length-1,monthlyStart:5,monthlyEnd:4+display.length};
+}
+function tierRows(scopeKey,tierList){
+ const rows=[];for(const m of display)for(const t of tierList){const tier=t[0],pm=prevM(m),py=prevY(m),show=m===SHOW_B,r=getAgg(m,scopeKey,tier);
+  rows.push([m,tier,t[1]+'-'+t[2],
+   cell(sf('list',scopeKey,tier,m),r.list),cell(sf('raw',scopeKey,tier,m),r.raw),cell(sf('sales',scopeKey,tier,m),r.sales),cell(sf('revenue',scopeKey,tier,m),r.revenue),
+   cell(avgFormula(scopeKey,tier,m),avgCache(scopeKey,tier,m)),cell(weightedFormula(scopeKey,tier,m),weightedCache(scopeKey,tier,m)),
+   cell('IFERROR('+sf('sales',scopeKey,tier,m)+'/'+sf('sales',scopeKey,'Top100',m)+',"")',getAgg(m,scopeKey,'Top100').sales? r.sales/getAgg(m,scopeKey,'Top100').sales:null),
+   cell('IFERROR('+sf('revenue',scopeKey,tier,m)+'/'+sf('revenue',scopeKey,'Top100',m)+',"")',getAgg(m,scopeKey,'Top100').revenue? r.revenue/getAgg(m,scopeKey,'Top100').revenue:null),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sf('sales',scopeKey,tier,m),sf('sales',scopeKey,tier,pm)),rate(r.sales,getAgg(pm,scopeKey,tier).sales)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sf('revenue',scopeKey,tier,m),sf('revenue',scopeKey,tier,pm)),rate(r.revenue,getAgg(pm,scopeKey,tier).revenue)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sf('sales',scopeKey,tier,m),sf('sales',scopeKey,tier,py)),rate(r.sales,getAgg(py,scopeKey,tier).sales)),
+   show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sf('revenue',scopeKey,tier,m),sf('revenue',scopeKey,tier,py)),rate(r.revenue,getAgg(py,scopeKey,tier).revenue)),
+   show?'展示样本':'层级范围来自同一Top100池']);}
+ return rows;
+}
+function writeTierSheet(scopeKey,name){
+ const rows=[[''],[''],[],['粗分层（领导结论）'],['月份','分层','BSR范围','Listing数','原始行数','销量','销售额','平均标价','加权成交均价','Top100销量份额','Top100销售额份额','MOM销量','MOM销售额','YOY销量','YOY销售额','备注']];
+ rows[0]=[scopes.find(s=>s[0]===scopeKey)[1]+' · BSR前100分层分析（公式页）'];
+ rows[1]=['粗分层：头部1-20、中部21-50、尾部51-100；细分层：1-5、6-10、11-20、21-50、51-100。两组均从同一Top100池计算。'];
+ const coarseHeader=5,coarseStart=6;rows.push(...tierRows(scopeKey,coarse));
+ const coarseEnd=rows.length;
+ const fineCaption=coarseEnd+3;rows.push([]);rows.push(['细分层（测款与链接规划）']);rows.push(['月份','分层','BSR范围','Listing数','原始行数','销量','销售额','平均标价','加权成交均价','Top100销量份额','Top100销售额份额','MOM销量','MOM销售额','YOY销量','YOY销售额','备注']);
+ const fineStart=rows.length+1;rows.push(...tierRows(scopeKey,fine));const fineEnd=rows.length;
+ const h1Caption=rows.length+3;rows.push([]);rows.push(['核心H1分层对比（2025H1 vs 2026H1）']);rows.push(['分层','2025H1销量','2026H1销量','销量YOY','2025H1销售额','2026H1销售额','销售额YOY','2026H1销量份额']);
+ const h1Start=rows.length+1;for(const t of coarse){const tier=t[0],s25=sumCache('sales',scopeKey,tier,'202501','202506'),s26=sumCache('sales',scopeKey,tier,'202601','202606'),r25=sumCache('revenue',scopeKey,tier,'202501','202506'),r26=sumCache('revenue',scopeKey,tier,'202601','202606'),all26=sumCache('sales',scopeKey,'Top100','202601','202606');rows.push([tier,cell(sfr('sales',scopeKey,tier,'202501','202506'),s25),cell(sfr('sales',scopeKey,tier,'202601','202606'),s26),cell(rateFormula(sfr('sales',scopeKey,tier,'202601','202606'),sfr('sales',scopeKey,tier,'202501','202506')),rate(s26,s25)),cell(sfr('revenue',scopeKey,tier,'202501','202506'),r25),cell(sfr('revenue',scopeKey,tier,'202601','202606'),r26),cell(rateFormula(sfr('revenue',scopeKey,tier,'202601','202606'),sfr('revenue',scopeKey,tier,'202501','202506')),rate(r26,r25)),cell('IFERROR('+sfr('sales',scopeKey,tier,'202601','202606')+'/'+sfr('sales',scopeKey,'Top100','202601','202606')+',"")',all26?s26/all26:null)]);}
+ const ws=addSheet(name,rows,[12,18,11,12,12,14,15,14,16,17,18,13,13,13,13,35],[[0,0,0,15],[3,0,3,15],[fineCaption-1,0,fineCaption-1,15],[h1Caption-1,0,h1Caption-1,7]]);
+ return {sheet:name,coarseStart,coarseEnd,fineStart,fineEnd,h1Start,h1End:h1Start+coarse.length-1};
+}
+const refs={};
+refs.overall={monthly:writeMonthlySheet('overall','01_整体市场-月度年度'),top:writeTopSheet('overall','02_整体市场-BSR前100'),tier:writeTierSheet('overall','03_整体市场-BSR分层')};
+refs.pp={monthly:writeMonthlySheet('pp','04_PP管-月度年度'),top:writeTopSheet('pp','05_PP管-BSR前100'),tier:writeTierSheet('pp','06_PP管-BSR分层')};
+refs.nonpp={monthly:writeMonthlySheet('nonpp','07_非PP高客单-月度年度'),top:writeTopSheet('nonpp','08_非PP高客单-BSR前100'),tier:writeTierSheet('nonpp','09_非PP高客单-BSR分层')};
+const genimoTopKeys=(a,b)=>{const out=new Set();for(const m of months.filter(x=>x>=a&&x<=b))for(const r of topBy.get(m+'|genimo')||[])out.add(r.key);return out;};
+
+
+function annualRef(scopeKey,metric,idx){const r=refs[scopeKey].monthly.annualStart+idx,col={raw:'C',list:'D',dup:'E',sales:'F',revenue:'G',price:'H',weighted:'I'}[metric];return "'"+refs[scopeKey].monthly.sheet+"'!$"+col+"$"+r;}
+const ovRows=[[''],[''],[],['核心指标','2025H1','2026H1','变化','主口径','数据状态','对应子表','公式来源','参考值（仅参考）','交付阅读提示']];
+ovRows[0]=['户外地垫市场分析 · 交付总览与结论'];
+ovRows[1]=['整体市场=PP管+非PP高客单产品线；GENIMO是整体市场中的品牌视角，不作为第三个分类。所有结果指标由各自子表公式链计算。'];
+const ovData=[
+ ['整体市场销量',annualRef('overall','sales',2),annualRef('overall','sales',3),'PP+非PP','核心父ASIN代表记录','01/02/03','01年度表',benchmark.industry?.growthPct==null?null:benchmark.industry.growthPct/100,'先看整体，再看分类'],
+ ['整体市场销售额',annualRef('overall','revenue',2),annualRef('overall','revenue',3),'PP+非PP','核心父ASIN代表记录','01/02/03','01年度表',null,'销售额与销量分别判断'],
+ ['PP销量',annualRef('pp','sales',2),annualRef('pp','sales',3),'标题含完整单词plastic','核心父ASIN代表记录','04/05/06','04年度表',null,'PP与非PP必须可加总'],
+ ['非PP高客单销量',annualRef('nonpp','sales',2),annualRef('nonpp','sales',3),'整体排除PP的补集','核心父ASIN代表记录','07/08/09','07年度表',null,'不是价格阈值分类'],
+ ['GENIMO整体市场销量份额',null,null,'GENIMO/整体市场','核心父ASIN代表记录','10/11/12','10品牌份额表',null,'品牌份额主分母为整体'],
+ ['整体市场BSR前100销量',annualRef('overall','sales',2),annualRef('overall','sales',3),'整体Top100独立池','核心父ASIN代表记录','02/03','02 Top100表',benchmark.bsrTop100?.growthPct==null?null:benchmark.bsrTop100.growthPct/100,'Top100最多100个独立Listing']
 ];
-const q = (s) => '"' + String(s).replaceAll('"', '""') + '"';
-const txt = (v) => v === null || v === undefined ? '' : String(v);
-const num = (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null;
-const present = (v) => num(v) !== null;
-const keyOf = (r) => txt(r.parent ?? r['父ASIN']).trim() || txt(r.asin ?? r.ASIN).trim() || ('row-' + r.row_id);
-function parseBsr(v) {
-  if (v === null || v === undefined || v === '') return null;
-  const matches = String(v).match(/(?<![\d.,])\d[\d,]*(?:\.0+)?(?![\d.])/g) || [];
-  const ranks = matches.map((x) => Number(x.replaceAll(',', ''))).filter((x) => Number.isInteger(x) && x > 0);
-  return ranks.length ? Math.min(...ranks) : null;
+for(const d of ovData){const [label,b25,b26,scopeText,statusText,sub,src,refv,prompt]=d;const v25=label==='整体市场销量'?sumCache('sales','overall','全部','202501','202506'):label==='整体市场销售额'?sumCache('revenue','overall','全部','202501','202506'):label==='PP销量'?sumCache('sales','pp','全部','202501','202506'):label==='非PP高客单销量'?sumCache('sales','nonpp','全部','202501','202506'):label==='整体市场BSR前100销量'?sumCache('sales','overall','Top100','202501','202506'):null;const v26=label==='整体市场销量'?sumCache('sales','overall','全部','202601','202606'):label==='整体市场销售额'?sumCache('revenue','overall','全部','202601','202606'):label==='PP销量'?sumCache('sales','pp','全部','202601','202606'):label==='非PP高客单销量'?sumCache('sales','nonpp','全部','202601','202606'):label==='整体市场BSR前100销量'?sumCache('sales','overall','Top100','202601','202606'):null;ovRows.push([label,cell(b25,v25),cell(b26,v26),cell(rateFormula(b26,b25),rate(v26,v25)),scopeText,statusText,sub,src,refv,prompt]);}
+const g25=sumCache('sales','genimo','全部','202501','202506'),g26=sumCache('sales','genimo','全部','202601','202606'),o25=sumCache('sales','overall','全部','202501','202506'),o26=sumCache('sales','overall','全部','202601','202606');
+ovRows[8]=['GENIMO整体市场销量份额',cell('IFERROR('+sfr('sales','genimo','全部','202501','202506')+'/'+sfr('sales','overall','全部','202501','202506')+',\"\")',o25?g25/o25:null),cell('IFERROR('+sfr('sales','genimo','全部','202601','202606')+'/'+sfr('sales','overall','全部','202601','202606')+',\"\")',o26?g26/o26:null),cell('IFERROR(C9/B9-1,\"\")',o25&&o26&&g25&&g26?(g26/o26)/(g25/o25)-1:null),'GENIMO/整体市场','核心父ASIN代表记录','10/11/12','10品牌份额表',null,'品牌份额主分母为整体'];
+ovRows[10]=[''];
+const logicStart=ovRows.length+2;ovRows.push(['关键逻辑校验','结果','期望/阈值','实际差额','状态','说明']);
+ovRows.push(['整体=PP+非PP（销量）',cell(annualRef('overall','sales',3)+'-('+annualRef('pp','sales',3)+'+'+annualRef('nonpp','sales',3)+')',0),0,cell('ABS(B13)',0),cell('IF(D13<0.5,"通过","失败")','通过'),'分类必须回到整体市场。']);
+ovRows.push(['整体=PP+非PP（销售额）',cell(annualRef('overall','revenue',3)+'-('+annualRef('pp','revenue',3)+'+'+annualRef('nonpp','revenue',3)+')',0),0,cell('ABS(B14)',0),cell('IF(D14<0.5,"通过","失败")','通过'),'销售额也必须校验。']);
+const maxTop100=Math.max(...display.map(m=>Math.max(getAgg(m,'overall','Top100').list,getAgg(m,'pp','Top100').list,getAgg(m,'nonpp','Top100').list)));
+ovRows.push(['Top100最大Listing数',cell('MAX(\'02_整体市场-BSR前100\'!$C$5:$C$'+refs.overall.top.monthlyEnd+',\'05_PP管-BSR前100\'!$C$5:$C$'+refs.pp.top.monthlyEnd+',\'08_非PP高客单-BSR前100\'!$C$5:$C$'+refs.nonpp.top.monthlyEnd+')',maxTop100),100,cell('B15-C15',maxTop100-100),cell('IF(D15<=0,"通过","失败")','通过'),'每范围每月最多100个独立Listing。']);
+ovRows.push(['2026.07展示父体数',cell('COUNTIFS(\'90_输入_明细\'!$A$3:$A$'+detailEnd+',"202607")',details.filter(r=>r.month==='202607').length),94,cell('B16-C16',details.filter(r=>r.month==='202607').length-94),cell('IF(D16=0,"通过","请复核")','请复核'),'展示样本数量；不作为核心增速。']);
+ovRows.push(['明细输入行数',cell('COUNTA(\'90_输入_明细\'!$A$3:$A$'+detailEnd+')',details.length),details.length,cell('B17-C17',0),cell('IF(D17=0,"通过","失败")','通过'),'90页值区行数。']);
+ovRows.push([]);
+ovRows.push(['核心趋势判断（公式引用，供2027决策）']);
+ovRows.push(['范围','销量H1 YOY','销售额H1 YOY','平均标价H1 YOY','趋势判断与2027动作']);
+const trendRowStart=ovRows.length+1;
+for(const [scopeKey,label] of [['overall','整体市场'],['pp','PP管'],['nonpp','非PP高客单']]){
+ const row=ovRows.length+1;
+ const s25=annualRef(scopeKey,'sales',2),s26=annualRef(scopeKey,'sales',3),r25=annualRef(scopeKey,'revenue',2),r26=annualRef(scopeKey,'revenue',3),p25=annualRef(scopeKey,'price',2),p26=annualRef(scopeKey,'price',3);
+ const fs=rateFormula(s26,s25),fr=rateFormula(r26,r25),fp=rateFormula(p26,p25);
+ const sv=sumCache('sales',scopeKey,'全部','202501','202506'),sn=sumCache('sales',scopeKey,'全部','202601','202606'),rv=sumCache('revenue',scopeKey,'全部','202501','202506'),rn=sumCache('revenue',scopeKey,'全部','202601','202606'),pv=periodAvg(scopeKey,'全部','202501','202506'),pn=periodAvg(scopeKey,'全部','202601','202606');
+ let action='结合销量、销售额和均价方向配置2027资源';
+ if(scopeKey==='overall') action=sn>sv&&rn<rv?'量增额降：2027先检查价格和产品结构，整体链接按PP基本盘与非PP增长分层配置':'结合销量、销售额和均价方向配置2027资源';
+ if(scopeKey==='pp') action=sn<sv&&rn>rv?'销量承压但销售额增长：保留高效PP链接，优先核查客单价和结构后再扩量':sn>sv&&rn>rv?'量额同增：可扩大验证，但仍按BSR层级控制库存':'销量或销售额承压：先复核产品与投放效率，再决定扩量';
+ if(scopeKey==='nonpp') action=sn>sv&&rn<rv?'销量增长但销售额下降：先筛选高客单和高效中流链接，再扩大非PP链接':'结合销量、销售额和均价方向配置2027资源';
+ ovRows.push([label,cell(fs,rate(sn,sv)),cell(fr,rate(rn,rv)),cell(fp,rate(pn,pv)),cell('IF(AND(B'+row+'>0,C'+row+'<0),"量增额降：优先检查价格与产品结构",IF(AND(B'+row+'>0,C'+row+'>0),"量额同增：按BSR层级扩大验证","先复核产品与投放效率，再决定扩量"))',action)]);
 }
+const genimoTrendRow=ovRows.length+1;
+ovRows.push(['GENIMO',cell('D9',o25&&o26&&g25&&g26?(g26/o26)/(g25/o25)-1:null),null,null,cell('IF(B'+genimoTrendRow+'>0,"整体市场份额提升：2027优先补充增长分层的中流链接，并用PP/非PP分别设测款门槛","整体市场份额未提升：先复核留存、退出和进入名单，再调整链接结构")',((g26/o26)/(g25/o25)-1)>0?'整体市场份额提升：2027优先补充增长分层的中流链接，并用PP/非PP分别设测款门槛':'整体市场份额未提升：先复核留存、退出和进入名单，再调整链接结构')]);
+ovRows.push(['说明','销量、销售额和均价变化均来自对应月度年度表；文字判断是公式条件输出，不能替代利润、库存、广告容量和测款复核。']);
+ovRows.push([]);
+const readStart=ovRows.length+2;ovRows.push(['逐表对应关系']);for(const x of [['01/02/03','整体市场：月度年度、BSR前100、粗细分层'],['04/05/06','PP管：月度年度、BSR前100、粗细分层'],['07/08/09','非PP高客单：月度年度、BSR前100、粗细分层'],['10/11/12','GENIMO：整体市场品牌份额、进退层、2027链接规划'],['90/91','输入与聚合：明细代表记录、可重算中间值'],['92/93','校验、来源、数据操作、口径限制']])ovRows.push([x[0],x[1]]);
+const ws00=addSheet('00_总览与结论',ovRows,[25,15,15,13,25,22,15,24,18,32],[[0,0,0,9],[1,0,1,9]]);
 
-const db = new DatabaseSync(DB_PATH, { readOnly: true });
-const cdb = new DatabaseSync(COMP_DB_PATH, { readOnly: true });
-const meta = db.prepare('SELECT * FROM meta ORDER BY id DESC LIMIT 1').get() || {};
-const replacements = db.prepare('SELECT * FROM analysis_replacements ORDER BY month').all();
-const replacementMap = new Map(replacements.map((r) => [String(r.month), r]));
-const catalog = db.prepare("SELECT target_table FROM sheet_catalog WHERE classification='monthly' ORDER BY sheet_order").all();
-const sourceMonths = catalog.map((r) => String(r.target_table).replace('monthly_', '')).filter((m) => /^\d{6}$/.test(m));
-// The leadership-facing workbook focuses on the requested H1 comparison and
-// July display-only sample; the full 2022-2026 source remains in market.db.
-const months = sourceMonths.filter((m) => m >= '202501' && m <= '202607');
 
-const profilesByMonth = new Map();
-for (const month of sourceMonths.filter((m) => m >= '202601' && m <= '202607')) {
-  const rawTable = 'raw_' + month;
-  if (!cdb.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(rawTable)) throw new Error('Missing ' + rawTable);
-  const profiles = new Map();
-  const rows = cdb.prepare('SELECT row_id, ASIN asin, "父ASIN" parent, 品牌 brand, 商品标题 title, 小类BSR bsr FROM ' + q(rawTable)).all();
-  for (const row of rows) {
-    const key = keyOf(row);
-    if (!key || key.startsWith('row-')) continue;
-    const p = profiles.get(key) || { plastic: false, genimo: false, ranks: { overall: null, pp: null, high: null, genimo: null } };
-    const rank = parseBsr(row.bsr);
-    const plastic = PLASTIC_WORD_RE.test(txt(row.title));
-    const genimo = txt(row.brand).trim().toLowerCase() === 'genimo';
-    p.plastic ||= plastic; p.genimo ||= genimo;
-    for (const [f, ok] of [['overall', true], ['pp', plastic], ['high', !plastic], ['genimo', genimo]]) {
-      if (ok && rank !== null && (p.ranks[f] === null || rank < p.ranks[f])) p.ranks[f] = rank;
-    }
-    profiles.set(key, p);
-  }
-  profilesByMonth.set(month, profiles);
-}
+const brandRows=[['GENIMO 品牌份额 · 整体市场主口径（公式页）'],['主指标=GENIMO/整体市场；PP内份额仅作辅助。整体市场包括PP和非PP，GENIMO不从分类加总中单列。'],[],['月份','整体销量','GENIMO销量','整体销量份额','整体销售额','GENIMO销售额','整体销售额份额','PP销量','GENIMO PP销量','PP内销量份额','GENIMO销量MOM','GENIMO销量YOY','GENIMO销售额MOM','GENIMO销售额YOY','备注']];
+for(const m of display){const pm=prevM(m),py=prevY(m),show=m===SHOW_B,rO=getAgg(m,'overall','全部'),rG=getAgg(m,'genimo','全部'),rP=getAgg(m,'pp','全部'),rGP=getAgg(m,'genimo_pp','全部');brandRows.push([m,
+ cell(sf('sales','overall','全部',m),rO.sales),cell(sf('sales','genimo','全部',m),rG.sales),cell('IFERROR('+sf('sales','genimo','全部',m)+'/'+sf('sales','overall','全部',m)+',"")',rO.sales?rG.sales/rO.sales:null),
+ cell(sf('revenue','overall','全部',m),rO.revenue),cell(sf('revenue','genimo','全部',m),rG.revenue),cell('IFERROR('+sf('revenue','genimo','全部',m)+'/'+sf('revenue','overall','全部',m)+',"")',rO.revenue?rG.revenue/rO.revenue:null),
+ cell(sf('sales','pp','全部',m),rP.sales),cell(sf('sales','genimo_pp','全部',m),rGP.sales),cell('IFERROR('+sf('sales','genimo_pp','全部',m)+'/'+sf('sales','pp','全部',m)+',"")',rP.sales?rGP.sales/rP.sales:null),
+ show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sf('sales','genimo','全部',m),sf('sales','genimo','全部',pm)),rate(rG.sales,getAgg(pm,'genimo','全部').sales)),
+ show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sf('sales','genimo','全部',m),sf('sales','genimo','全部',py)),rate(rG.sales,getAgg(py,'genimo','全部').sales)),
+ show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sf('revenue','genimo','全部',m),sf('revenue','genimo','全部',pm)),rate(rG.revenue,getAgg(pm,'genimo','全部').revenue)),
+ show?cell('IFERROR(0/0,"")',null):cell(rateFormula(sf('revenue','genimo','全部',m),sf('revenue','genimo','全部',py)),rate(rG.revenue,getAgg(py,'genimo','全部').revenue)),
+ show?'展示样本':'整体市场为主分母']);}
+const bsum=brandRows.length+2;brandRows.push([]);brandRows.push(['GENIMO核心H1品牌份额']);brandRows.push(['指标','2025H1','2026H1','变化','2025H1 PP内','2026H1 PP内','PP内变化','解释']);
+const gP25=sumCache('sales','genimo_pp','全部','202501','202506'),gP26=sumCache('sales','genimo_pp','全部','202601','202606'),p25=sumCache('sales','pp','全部','202501','202506'),p26=sumCache('sales','pp','全部','202601','202606');
+brandRows.push(['销量份额',cell('IFERROR('+sfr('sales','genimo','全部','202501','202506')+'/'+sfr('sales','overall','全部','202501','202506')+',"")',o25?g25/o25:null),cell('IFERROR('+sfr('sales','genimo','全部','202601','202606')+'/'+sfr('sales','overall','全部','202601','202606')+',"")',o26?g26/o26:null),cell('IFERROR(C'+(bsum+3)+'/B'+(bsum+3)+'-1,"")',o25&&o26&&g25&&g26?(g26/o26)/(g25/o25)-1:null),cell('IFERROR('+sfr('sales','genimo_pp','全部','202501','202506')+'/'+sfr('sales','pp','全部','202501','202506')+',"")',p25?gP25/p25:null),cell('IFERROR('+sfr('sales','genimo_pp','全部','202601','202606')+'/'+sfr('sales','pp','全部','202601','202606')+',"")',p26?gP26/p26:null),cell('IFERROR(F'+(bsum+3)+'/E'+(bsum+3)+'-1,"")',p25&&p26&&gP25&&gP26?(gP26/p26)/(gP25/p25)-1:null),'整体为主分母，PP内为辅助'],
+ ['销售额份额',cell('IFERROR('+sfr('revenue','genimo','全部','202501','202506')+'/'+sfr('revenue','overall','全部','202501','202506')+',"")',null),cell('IFERROR('+sfr('revenue','genimo','全部','202601','202606')+'/'+sfr('revenue','overall','全部','202601','202606')+',"")',null),null,null,null,null,'整体销售额份额'],
+ ['说明',null,null,null,null,null,null,null,'GENIMO PP内份额仅用于产品线内部观察']);
+brandRows.push(['策略提示','若要稳住GENIMO整体市场份额，应先看整体市场中增长的PP/非PP分层，再配置对应中流链接；高客单非PP是PP补集；B5输入目标链接总数后，12页给出链接分配草案。']);
+const ws10=addSheet('10_GENIMO-品牌份额',brandRows,[12,14,14,15,15,16,16,12,15,14,15,15,16,16,38],[[0,0,0,14],[1,0,1,14],[bsum-1,0,bsum-1,14]]);
+const cohortKeys25=genimoTopKeys('202501','202506'),cohortKeys26=genimoTopKeys('202601','202606');
+const retained=[...cohortKeys25].filter(k=>cohortKeys26.has(k)).sort(),exited=[...cohortKeys25].filter(k=>!cohortKeys26.has(k)).sort(),entered=[...cohortKeys26].filter(k=>!cohortKeys25.has(k)).sort();
+const cohortRows=[['GENIMO BSR前100进退层 · H1 cohort（公式页）'],['留存=2025H1和2026H1均出现，退出=仅2025H1，进入=仅2026H1。集合识别由脚本完成，销量/销售额由90页明细公式汇总。'],[],['状态','Listing键','2025H1出现月数','2026H1出现月数','2025H1销量','2026H1销量','2025H1销售额','2026H1销售额','代表品牌','代表标题']];
+const detailA="'90_输入_明细'!$A$3:$A$"+detailEnd,detailB="'90_输入_明细'!$B$3:$B$"+detailEnd,detailK="'90_输入_明细'!$K$3:$K$"+detailEnd,detailL="'90_输入_明细'!$L$3:$L$"+detailEnd,detailF="'90_输入_明细'!$F$3:$F$"+detailEnd,detailG="'90_输入_明细'!$G$3:$G$"+detailEnd;
+const dStats=(key,a,b)=>{const rs=details.filter(r=>r.key===key&&r.month>=a&&r.month<=b);return{months:new Set(rs.map(r=>r.month)).size,sales:total(rs,r=>r.sales),revenue:total(rs,r=>r.revenue)};};
+for(const item of [...retained.map(k=>['留存',k]),...exited.map(k=>['退出',k]),...entered.map(k=>['进入',k])]){const row=cohortRows.length+1;const kRef='B'+row,s25=dStats(item[1],'202501','202506'),s26=dStats(item[1],'202601','202606'),repr=details.find(r=>r.key===item[1])||{};cohortRows.push([item[0],item[1],
+ cell('COUNTIFS('+detailA+',">=202501",'+detailA+',"<=202506",'+detailB+','+kRef+')',s25.months),
+ cell('COUNTIFS('+detailA+',">=202601",'+detailA+',"<=202606",'+detailB+','+kRef+')',s26.months),
+ cell('SUMIFS('+detailK+','+detailA+',">=202501",'+detailA+',"<=202506",'+detailB+','+kRef+')',s25.sales),
+ cell('SUMIFS('+detailK+','+detailA+',">=202601",'+detailA+',"<=202606",'+detailB+','+kRef+')',s26.sales),
+ cell('SUMIFS('+detailL+','+detailA+',">=202501",'+detailA+',"<=202506",'+detailB+','+kRef+')',s25.revenue),
+ cell('SUMIFS('+detailL+','+detailA+',">=202601",'+detailA+',"<=202606",'+detailB+','+kRef+')',s26.revenue),
+ cell('IFERROR(INDEX('+detailF+',MATCH('+kRef+','+detailB+',0)),"")',repr.brand||''),
+ cell('IFERROR(INDEX('+detailG+',MATCH('+kRef+','+detailB+',0)),"")',repr.title||'')]);}
+const cohortSummary=cohortRows.length+2;cohortRows.push([]);cohortRows.push(['集合统计','数量','说明','可复核位置']);cohortRows.push(['留存',cell('COUNTIF($A$5:$A$'+(cohortRows.length-1)+',"留存")',retained.length),'两期均在GENIMO Top100集合','本页明细']);cohortRows.push(['退出',cell('COUNTIF($A$5:$A$'+(cohortRows.length-1)+',"退出")',exited.length),'仅2025H1在集合','本页明细']);cohortRows.push(['进入',cell('COUNTIF($A$5:$A$'+(cohortRows.length-1)+',"进入")',entered.length),'仅2026H1在集合','本页明细']);
+const ws11=addSheet('11_GENIMO-进退层',cohortRows,[12,20,16,16,15,15,16,16,18,62],[[0,0,0,9],[1,0,1,9]]);
 
-const detailRows = [];
-for (const month of months) {
-  const table = 'monthly_' + month;
-  const rows = db.prepare('SELECT row_id, ASIN asin, SKU sku, "父ASIN" parent, 品牌 brand, 商品标题 title, 小类BSR bsr, 月销量 sales, 月销售额 revenue, 价格 price FROM ' + q(table)).all();
-  const profiles = profilesByMonth.get(month);
-  for (const row of rows) {
-    const key = keyOf(row); const profile = profiles?.get(key); const parsed = parseBsr(row.bsr);
-    const pp = profile ? profile.plastic : PLASTIC_WORD_RE.test(txt(row.title));
-    const genimo = profile ? profile.genimo : txt(row.brand).trim().toLowerCase() === 'genimo';
-    const sales = num(row.sales); const revenue = num(row.revenue); const price = num(row.price);
-    const ranks = profile?.ranks || {};
-    detailRows.push({ month, listingKey: key, parent: txt(row.parent).trim(), asin: txt(row.asin).trim(), brand: txt(row.brand).trim(), title: txt(row.title).trim(),
-      ppFlag: pp ? 1 : 0, highFlag: pp ? 0 : 1, genimoFlag: genimo ? 1 : 0, sales, revenue, price,
-      rankOverall: ranks.overall ?? parsed, rankPP: ranks.pp ?? (pp ? parsed : null), rankHigh: ranks.high ?? (!pp ? parsed : null), rankGenimo: ranks.genimo ?? (genimo ? parsed : null),
-      salesValid: sales === null ? 0 : 1, revenueValid: revenue === null ? 0 : 1, pairedValid: sales !== null && revenue !== null ? 1 : 0, priceValid: price === null ? 0 : 1,
-      source: replacementMap.has(month) ? '2026竞品原始镜像→确定性去重代表行' : '主源工作簿月度明细行', sourceRowId: Number(row.row_id), coreFlag: month >= '202601' && month <= '202606' ? 1 : 0, julyFlag: month === '202607' ? 1 : 0,
-      topOverall: 0, topPP: 0, topHigh: 0, topGenimo: 0 });
-  }
-}
 
-for (const month of months) {
-  const rows = detailRows.filter((r) => r.month === month);
-  for (const c of CATEGORIES) {
-    const eligible = rows.filter((r) => {
-      const flag = c === 'overall' ? true : c === 'pp' ? r.ppFlag : c === 'high' ? r.highFlag : r.genimoFlag;
-      const rank = c === 'overall' ? r.rankOverall : c === 'pp' ? r.rankPP : c === 'high' ? r.rankHigh : r.rankGenimo;
-      return flag && Number.isInteger(rank) && rank >= 1 && rank <= 100;
-    }).sort((a, b) => {
-      const ar = c === 'overall' ? a.rankOverall : c === 'pp' ? a.rankPP : c === 'high' ? a.rankHigh : a.rankGenimo;
-      const br = c === 'overall' ? b.rankOverall : c === 'pp' ? b.rankPP : c === 'high' ? b.rankHigh : b.rankGenimo;
-      return ar - br || a.listingKey.localeCompare(b.listingKey) || a.sourceRowId - b.sourceRowId;
-    }).slice(0, 100);
-    const flagName = { overall: 'topOverall', pp: 'topPP', high: 'topHigh', genimo: 'topGenimo' }[c];
-    for (const row of eligible) row[flagName] = 1;
-  }
-}
+const planRows=[['GENIMO 2027链接规划 · 公式草案'],['先输入目标链接总数，再观察整体市场、PP和非PP的核心Top100层级份额。规划是公式草案，仍需结合利润、库存、广告容量和测款结果复核。'],[],['输入项','数值'],['计划新增链接总数',0],[],['范围','层级','2025H1销量','2026H1销量','销量YOY','2026H1销量份额','建议链接数','产品策略提示','测款优先级','库存建议','广告建议','利润/晋级退出门槛','公式来源']];
+for(const s of [['overall','整体市场'],['pp','PP管'],['nonpp','非PP高客单']])for(const t of coarse){const tier=t[0],idx=coarse.findIndex(x=>x[0]===tier),h=refs[s[0]].tier.h1Start+idx,s25=sumCache('sales',s[0],tier,'202501','202506'),s26=sumCache('sales',s[0],tier,'202601','202606'),all26=sumCache('sales',s[0],'Top100','202601','202606');const product=tier==='头部（1-20）'?'品牌心智与规模款；控制库存周转':tier==='中部（21-50）'?'优先测款和扩充中流链接':'长尾机会小批量验证，控制试错成本';const inventory=tier==='头部（1-20）'?'主推尺寸保持8-12周安全库存':tier==='中部（21-50）'?'小批量备货，按4-8周周转滚动':'试销库存控制在2-4周，达标再补';const ads=tier==='头部（1-20）'?'品牌词与核心词守位，按转化率加预算':tier==='中部（21-50）'?'设置独立测款预算，达标后逐步放量':'低预算长尾测试，避免为未验证链接持续烧费';const gate=tier==='头部（1-20）'?'毛利率和库存周转达标才扩充同类链接':tier==='中部（21-50）'?'连续4周达到转化/毛利门槛则晋级，否则降级复盘':'连续4周未达转化/毛利门槛则退出或换款';planRows.push([s[1],tier,cell(sfr('sales',s[0],tier,'202501','202506'),s25),cell(sfr('sales',s[0],tier,'202601','202606'),s26),cell(rateFormula(sfr('sales',s[0],tier,'202601','202606'),sfr('sales',s[0],tier,'202501','202506')),rate(s26,s25)),cell("'"+refs[s[0]].tier.sheet+"'!H"+h,all26?s26/all26:null),cell('IF($B$5=0,"",ROUND($B$5*F'+(planRows.length+1)+',0))',null),product,cell('IF(E'+(planRows.length+1)+'>0,"优先","观察")',rate(s26,s25)>0?'优先':'观察'),inventory,ads,gate,refs[s[0]].tier.sheet+'!H'+h]);}
+planRows.push([]);planRows.push(['使用说明','B5为唯一输入；建议链接数按各范围核心H1销量份额计算。PP/非PP/整体分别展示，GENIMO品牌策略先使用整体市场份额作为主口径。']);
+const ws12=addSheet('12_GENIMO-2027规划',planRows,[18,18,16,16,13,17,17,44,14,34,42,46,40],[[0,0,0,12],[1,0,1,12],[3,0,3,1],[planRows.length-1,0,planRows.length-1,12]]);
 
-function stats(rows) {
-  const salesRows = rows.filter((r) => present(r.sales)); const revenueRows = rows.filter((r) => present(r.revenue)); const paired = rows.filter((r) => present(r.sales) && present(r.revenue)); const prices = rows.filter((r) => present(r.price));
-  return { listingCount: rows.length, salesValueCount: salesRows.length, revenueValueCount: revenueRows.length, pairedCount: paired.length, priceCount: prices.length,
-    sales: salesRows.reduce((s, r) => s + r.sales, 0), revenue: revenueRows.reduce((s, r) => s + r.revenue, 0), pairedSales: paired.reduce((s, r) => s + r.sales, 0), pairedRevenue: paired.reduce((s, r) => s + r.revenue, 0), priceSum: prices.reduce((s, r) => s + r.price, 0) };
-}
-const aggregateRows = [];
-for (const month of months) {
-  const rows = detailRows.filter((r) => r.month === month);
-  for (const c of CATEGORIES) {
-    const flagName = { overall: null, pp: 'ppFlag', high: 'highFlag', genimo: 'genimoFlag' }[c];
-    const topName = { overall: 'topOverall', pp: 'topPP', high: 'topHigh', genimo: 'topGenimo' }[c];
-    const cat = rows.filter((r) => !flagName || r[flagName] === 1);
-    const topRows = cat.filter((r) => r[topName] === 1);
-    aggregateRows.push({ month, category: c, categoryLabel: CATEGORY_LABELS[c], tier: '全部', ...stats(cat), topCount: 0 });
-    aggregateRows.push({ month, category: c, categoryLabel: CATEGORY_LABELS[c], tier: 'Top100', ...stats(topRows), topCount: topRows.length });
-    for (const tier of TIERS) {
-      const tierRows = topRows.filter((r) => { const rank = c === 'overall' ? r.rankOverall : c === 'pp' ? r.rankPP : c === 'high' ? r.rankHigh : r.rankGenimo; return Number.isInteger(rank) && rank >= tier.min && rank <= tier.max; });
-      aggregateRows.push({ month, category: c, categoryLabel: CATEGORY_LABELS[c], tier: tier.key, ...stats(tierRows), topCount: tierRows.length });
-    }
-  }
-  const genimoPpRows = rows.filter((r) => r.genimoFlag === 1 && r.ppFlag === 1);
-  aggregateRows.push({ month, category: 'genimo_pp', categoryLabel: 'GENIMO PP', tier: '全部', ...stats(genimoPpRows), topCount: 0 });
-}
+const checkRows=[['公式校验与数据完整性'],['校验项','结果','期望/阈值','实际差额','状态','说明'],['整体=PP+非PP（2026H1销量）',cell(annualRef('overall','sales',3)+'-('+annualRef('pp','sales',3)+'+'+annualRef('nonpp','sales',3)+')',0),0,cell('ABS(B3)',0),cell('IF(ABS(B3)<0.5,"通过","失败")','通过'),'整体市场必须等于两个互补分类之和。'],['整体=PP+非PP（2026H1销售额）',cell(annualRef('overall','revenue',3)+'-('+annualRef('pp','revenue',3)+'+'+annualRef('nonpp','revenue',3)+')',0),0,cell('ABS(B4)',0),cell('IF(ABS(B4)<0.5,"通过","失败")','通过'),'销售额同样校验。'],['Top100最大Listing数',cell('MAX(\'02_整体市场-BSR前100\'!$C$5:$C$'+refs.overall.top.monthlyEnd+',\'05_PP管-BSR前100\'!$C$5:$C$'+refs.pp.top.monthlyEnd+',\'08_非PP高客单-BSR前100\'!$C$5:$C$'+refs.nonpp.top.monthlyEnd+')',maxTop100),100,cell('B5-C5',maxTop100-100),cell('IF(B5<=C5,"通过","失败")','通过'),'每范围每月最多100个独立Listing。'],['2026.07展示父体数',cell('COUNTIFS(\'90_输入_明细\'!$A$3:$A$'+detailEnd+',"202607")',details.filter(r=>r.month==='202607').length),94,cell('B6-C6',details.filter(r=>r.month==='202607').length-94),cell('IF(B6=C6,"通过","请复核")','请复核'),'展示样本数量；不作为核心增速。'],['明细输入行数',cell('COUNTA(\'90_输入_明细\'!$A$3:$A$'+detailEnd+')',details.length),details.length,cell('B7-C7',0),cell('IF(B7=C7,"通过","失败")','通过'),'90页值区行数。'],['缺失销量记录数',cell('COUNTIF(\'90_输入_明细\'!$T$3:$T$'+detailEnd+',0)',details.filter(r=>r.sv===0).length),0,cell('B8-C8',details.filter(r=>r.sv===0).length),cell('IF(B8=C8,"通过","请复核")','请复核'),'缺失保留为空，不按0计入有效分母。'],['缺失销售额记录数',cell('COUNTIF(\'90_输入_明细\'!$U$3:$U$'+detailEnd+',0)',details.filter(r=>r.rv===0).length),0,cell('B9-C9',details.filter(r=>r.rv===0).length),cell('IF(B9=C9,"通过","请复核")','请复核'),'缺失保留为空，不按0计入有效分母。']];
+const ws92=addSheet('92_校验',checkRows,[36,16,15,15,14,58],[[0,0,0,5]]);
+const rulesRows=[['来源、数据操作和规则登记'],[],['项目','当前值/规则','来源文件/表','计算或操作','是否写入原始数据','可复核位置','限制/解释','备注'],
+ ['主源数据','data/raw中的主源工作簿，按sheet_catalog识别月表','data/raw/地垫-卖家精灵市场数据.xlsx；market.db','只读读取market.db月表；未改写raw文件','否','90_输入_明细','历史月份原始表存在变体/父体语义差异','缺失值保留为空'],
+ ['2026替换链','2026.01-07竞品替换快照','competitor_809440.db raw_YYYYMM','读取替换快照做父体/ASIN维度排名补充；不覆盖源文件','否（仅派生结果）','90/91页','2026.07为94父体展示样本','核心截止2026.06'],
+ ['去重逻辑','父ASIN优先，缺省时用ASIN；每月组内选最小可解析BSR，若并列选指标更完整行，再选最小源行ID','本次生成脚本；与src/build_competitor_db.js规则对齐','所有月份结果先形成父ASIN/ASIN代表记录；原始行数、去重行数同时保留','否','90页Listing键、原始行数、去重行数','这是统计单元选择，不删除raw记录','结果可追溯源行'],
+ ['BSR解析与Top100','完整数字/带逗号/允许N.0；多值取最小正整数；每个范围每月最多100','market.db与competitor_809440.db','按overall、PP、非PP、GENIMO分别形成独立Top100池；分层不跨池','否','90页BSR列；02/05/08、03/06/09页','GENIMO是品牌镜头，不参与PP+非PP加总',''],
+ ['分类定义','PP=标题含完整单词plastic；非PP=整体排除PP的补集；GENIMO=品牌字段等于GENIMO','原始标题/品牌字段 + 2026同父体变体补充','整体、PP、非PP为互补市场分区；GENIMO独立作为品牌份额与进退层视角','否','01/04/07、10页','非PP高客单不是价格阈值，按需求定义为排除PP后的产品线',''],
+ ['销量/销售额/均价','销量和销售额分别汇总；平均标价=有效价格合计/有效价格数；加权成交均价=配对销售额/配对销量','原始月销量、月销售额、价格字段','公式页从91_聚合输入计算；缺失值不按0进入分母','否','01/02/03等结果页','平均标价与成交均价不能混称客单价',''],
+ ['MOM与YOY','MOM=当前月 vs 上一自然月；YOY=当前月 vs 去年同月','原始需求与说明文件；本次明确拆列','每个范围、Top100、分层和GENIMO均分别提供MOM/YOY；2026.07留空增速','否','月度、BSR、分层、品牌份额页','首月缺基准时留空',''],
+ ['年度与核心周期','2024全年、2025全年、2025H1、2026H1；2026.01-06为核心，2026.07只展示','原始需求、SPEC','年度表和H1表均用公式引用91页','否','各月度/Top100页年度区块','不静默延长核心窗口',''],
+ ['GENIMO分母','主口径=GENIMO/整体市场；PP内份额只作辅助','原始需求中的品牌占比要求','10页同时给整体销量/销售额份额、PP内销量份额；12页计划按整体/PP/非PP分别观察','否','10/11/12页','不能把GENIMO当成第三个市场分类',''],
+ ['本次实际数据操作','只读数据库，写入一份结果xlsx：90明细值、91聚合值、各子表公式和校验；未改写raw、未删除历史审计记录','本次脚本与输出文件','脚本预处理仅负责代表记录、排名和集合识别；可重算指标均落到Excel公式','否','90-93页','交付时以xlsx为主，公式可在Excel/兼容工具中复核','']];
+const ws93=addSheet('93_来源与规则',rulesRows,[20,38,52,60,16,28,48,34],[[0,0,0,7],[1,0,1,7],[2,0,2,7]]);
 
-const ref = JSON.parse(await fs.readFile(JSON_PATH, 'utf8'));
-const benchmark = ref.leadershipBenchmark || {};
-const inputHeaders = ['月份', 'Listing键', '父ASIN', 'ASIN', '品牌', '商品标题', 'PP标记', '高客单非PP标记', 'GENIMO标记', '月销量', '月销售额', '价格', '整体BSR', 'PP BSR', '高客单非PP BSR', 'GENIMO BSR', '销量有效', '销售额有效', '配对有效', '价格有效', '来源', '源行ID', '核心标记', '2026.07展示标记', '整体Top100', 'PP Top100', '高客单非PP Top100', 'GENIMO Top100'];
-const inputValues = detailRows.map((r) => [r.month, r.listingKey, r.parent || null, r.asin || null, r.brand || null, r.title || null, r.ppFlag, r.highFlag, r.genimoFlag, r.sales, r.revenue, r.price, r.rankOverall, r.rankPP, r.rankHigh, r.rankGenimo, r.salesValid, r.revenueValid, r.pairedValid, r.priceValid, r.source, r.sourceRowId, r.coreFlag, r.julyFlag, r.topOverall, r.topPP, r.topHigh, r.topGenimo]);
-
-const wb = Workbook.create();
-const S = (n) => wb.worksheets.add(n);
-const overview = S('00_概览'), monthly = S('01_整体月度'), top = S('02_BSR整体'), tiers = S('03_BSR头中尾'), cats = S('04_分类月度'), brands = S('05_品牌份额'), decisions = S('06_决策建议'), core = S('07_核心汇总'), checks = S('08_校验'), input = S('90_输入_明细'), agg = S('91_聚合输入'), rules = S('92_来源与规则');
-for (const sh of [overview, monthly, top, tiers, cats, brands, decisions, core, checks, input, agg, rules]) sh.showGridLines = false;
-const navy = '#1F4E78', blue = '#5B9BD5', yellow = '#FFF2CC', green = '#E2F0D9', red = '#FCE4D6';
-function title(sh, range, value) { sh.mergeCells(range); sh.getRange(range.split(':')[0]).values = [[value]]; sh.getRange(range).format = { fill: navy, font: { bold: true, color: '#FFFFFF', size: 15 }, rowHeight: 28 }; }
-function hdr(sh, range) { sh.getRange(range).format = { fill: blue, font: { bold: true, color: '#FFFFFF' }, wrapText: true, rowHeight: 30, borders: { preset: 'all', style: 'thin', color: '#D9E2F3' } }; }
-function widths(sh, arr, rows) { arr.forEach((w, i) => sh.getRangeByIndexes(0, i, rows, 1).format.columnWidth = w); }
-function body(sh, range, fmts = {}) { sh.getRange(range).format.borders = { insideHorizontal: { style: 'thin', color: '#E7E6E6' } }; for (const [r, f] of Object.entries(fmts)) sh.getRange(r).format.numberFormat = f; }
-
-title(input, 'A1:AB1', '原始明细输入（值）· 结果页由公式引用聚合输入'); input.getRange('A2:AB2').values = [inputHeaders]; hdr(input, 'A2:AB2');
-for (let i = 0; i < inputValues.length; i += 5000) { const part = inputValues.slice(i, i + 5000); input.getRange(`A${i + 3}:AB${i + 2 + part.length}`).values = part; }
-const inputEnd = inputValues.length + 2; input.freezePanes.freezeRows(2); input.freezePanes.freezeColumns(6); input.getRange(`J3:K${inputEnd}`).format.numberFormat = '#,##0;[Red]-#,##0'; input.getRange(`L3:L${inputEnd}`).format.numberFormat = '$#,##0.00;[Red]-$#,##0.00'; widths(input, [10, 17, 15, 14, 16, 52, 9, 12, 10, 12, 14, 11, 10, 9, 13, 11, 9, 10, 10, 9, 28, 9, 9, 12, 11, 9, 14, 12], inputEnd + 1);
-
-title(agg, 'A1:Q1', '聚合输入（由脚本按明细与同一规则预汇总，供Excel公式重算）');
-agg.getRange('A2:Q2').values = [['月份', '分类键', '分类', '层级', 'Listing行数', '销量', '销售额', '价格合计', '价格有效数', '配对销量', '配对销售额', '销量有效数', '销售额有效数', '配对有效数', 'Top100行数', '来源', '说明']]; hdr(agg, 'A2:Q2');
-const aggValues = aggregateRows.map((r) => [r.month, r.category, r.categoryLabel, r.tier, r.listingCount, r.sales, r.revenue, r.priceSum, r.priceCount, r.pairedSales, r.pairedRevenue, r.salesValueCount, r.revenueValueCount, r.pairedCount, r.topCount, replacementMap.has(r.month) ? '竞品替换链' : '主源明细', '明细值已保留在90_输入_明细；本页仅为可追溯的中间聚合']);
-const aggEnd = aggValues.length + 2; agg.getRange(`A3:Q${aggEnd}`).values = aggValues; agg.getRange(`E3:G${aggEnd}`).format.numberFormat = '#,##0;[Red]-#,##0'; agg.getRange(`H3:K${aggEnd}`).format.numberFormat = '$#,##0.00;[Red]-$#,##0.00'; widths(agg, [10, 11, 16, 15, 12, 13, 15, 13, 12, 13, 15, 12, 13, 12, 11, 16, 48], aggEnd + 1); agg.freezePanes.freezeRows(2);
-
-const AR = `'91_聚合输入'!$A$3:$A$${aggEnd}`, BR = `'91_聚合输入'!$B$3:$B$${aggEnd}`, DR = `'91_聚合输入'!$D$3:$D$${aggEnd}`;
-function aSum(col, mcell, cat, tier) { return `SUMIFS('91_聚合输入'!$${col}$3:$${col}$${aggEnd},${AR},${mcell},${BR},"${cat}",${DR},"${tier}")`; }
-function aCore(col, cat, start, end) { return `SUMIFS('91_聚合输入'!$${col}$3:$${col}$${aggEnd},${AR},">=${start}",${AR},"<=${end}",${BR},"${cat}",${DR},"全部")`; }
-function aPrice(mcell, cat, tier) { return `IFERROR(${aSum('H', mcell, cat, tier)}/${aSum('I', mcell, cat, tier)},"")`; }
-function aWeighted(mcell, cat, tier) { return `IFERROR(${aSum('K', mcell, cat, tier)}/${aSum('J', mcell, cat, tier)},"")`; }
-function corePrice(cat, start, end) { return `IFERROR(${aCore('H', cat, start, end)}/${aCore('I', cat, start, end)},"")`; }
-function coreWeighted(cat, start, end) { return `IFERROR(${aCore('K', cat, start, end)}/${aCore('J', cat, start, end)},"")`; }
-
-title(monthly, 'A1:O1', '整体市场月度汇总 · 公式页'); monthly.mergeCells('A2:O2'); monthly.getRange('A2').values = [['整体市场=全部产品；MOM/环比=当前月 vs 去年同月；2026.07仅展示。']]; monthly.getRange('A2:O2').format = { fill: yellow, font: { italic: true, color: '#7F6000' }, wrapText: true }; monthly.getRange('A4:O4').values = [['月份', '范围', 'Listing行数', '销量', '销售额', '平均标价', '配对销量', '配对销售额', '加权成交均价', '销量覆盖率', '销售额覆盖率', '配对覆盖率', 'MOM基准月', '销量MOM/环比', '销售额MOM/环比']]; hdr(monthly, 'A4:O4');
-const ms = 5, me = ms + months.length - 1; monthly.getRange(`A${ms}:B${me}`).values = months.map((m) => [m, m <= '202606' ? '核心' : (m === '202607' ? '展示' : '历史')]);
-for (let i = 0; i < months.length; i++) { const r = ms + i, m = `A${r}`, basis = i >= 12 ? months[i - 12] : ''; monthly.getRange(`C${r}:L${r}`).formulas = [[`=${aSum('E', m, 'overall', '全部')}`, `=${aSum('F', m, 'overall', '全部')}`, `=${aSum('G', m, 'overall', '全部')}`, `=${aPrice(m, 'overall', '全部')}`, `=${aSum('J', m, 'overall', '全部')}`, `=${aSum('K', m, 'overall', '全部')}`, `=${aWeighted(m, 'overall', '全部')}`, `=IFERROR(${aSum('L', m, 'overall', '全部')}/C${r},"")`, `=IFERROR(${aSum('M', m, 'overall', '全部')}/C${r},"")`, `=IFERROR(${aSum('N', m, 'overall', '全部')}/C${r},"")`]]; monthly.getRange(`M${r}`).values = [[basis]]; monthly.getRange(`N${r}:O${r}`).formulas = [[basis ? `=IFERROR(D${r}/SUMIFS($D$${ms}:$D$${me},$A$${ms}:$A$${me},M${r})-1,"")` : '=""', basis ? `=IFERROR(E${r}/SUMIFS($E$${ms}:$E$${me},$A$${ms}:$A$${me},M${r})-1,"")` : '=""']]; }
-body(monthly, `A${ms}:O${me}`, { [`C${ms}:E${me}`]: '#,##0;[Red]-#,##0', [`F${ms}:I${me}`]: '$#,##0.00;[Red]-$#,##0.00', [`J${ms}:L${me}`]: '0.0%', [`N${ms}:O${me}`]: '0.0%;[Red]-0.0%' }); widths(monthly, [11, 9, 12, 13, 15, 12, 13, 15, 14, 12, 12, 12, 12, 13, 13], me + 1); monthly.freezePanes.freezeRows(4);
-
-function writeCatSheet() { title(cats, 'A1:M1', '分类月度汇总 · 公式页'); cats.mergeCells('A2:M2'); cats.getRange('A2').values = [['PP=标题完整单词plastic；高客单非PP=排除PP后的全部产品；GENIMO份额在05页以整体为分母。']]; cats.getRange('A2:M2').format = { fill: yellow, font: { italic: true, color: '#7F6000' }, wrapText: true }; cats.getRange('A4:M4').values = [['月份', '分类', '范围', 'Listing行数', '销量', '销售额', '平均标价', '加权成交均价', '整体销量份额', '整体销售额份额', 'MOM基准月', '销量MOM/环比', '销售额MOM/环比']]; hdr(cats, 'A4:M4'); const start = 5, rows = []; for (const m of months) for (const c of CATEGORIES) rows.push([m, CATEGORY_LABELS[c], m <= '202606' ? '核心' : (m === '202607' ? '展示' : '历史')]); const end = start + rows.length - 1; cats.getRange(`A${start}:C${end}`).values = rows; for (let i = 0; i < rows.length; i++) { const r = start + i, m = `A${r}`, c = CATEGORIES[i % 4], basis = months.indexOf(rows[i][0]) >= 12 ? months[months.indexOf(rows[i][0]) - 12] : ''; cats.getRange(`D${r}:J${r}`).formulas = [[`=${aSum('E', m, c, '全部')}`, `=${aSum('F', m, c, '全部')}`, `=${aSum('G', m, c, '全部')}`, `=${aPrice(m, c, '全部')}`, `=${aWeighted(m, c, '全部')}`, c === 'overall' ? '=""' : `=IFERROR(E${r}/SUMIFS($E$${start}:$E$${end},$A$${start}:$A$${end},A${r},$B$${start}:$B$${end},"整体市场"),"")`, c === 'overall' ? '=""' : `=IFERROR(F${r}/SUMIFS($F$${start}:$F$${end},$A$${start}:$A$${end},A${r},$B$${start}:$B$${end},"整体市场"),"")`]]; cats.getRange(`K${r}`).values = [[basis]]; cats.getRange(`L${r}:M${r}`).formulas = [[basis ? `=IFERROR(E${r}/SUMIFS($E$${start}:$E$${end},$A$${start}:$A$${end},K${r},$B$${start}:$B$${end},B${r})-1,"")` : '=""', basis ? `=IFERROR(F${r}/SUMIFS($F$${start}:$F$${end},$A$${start}:$A$${end},K${r},$B$${start}:$B$${end},B${r})-1,"")` : '=""']]; } body(cats, `A${start}:M${end}`, { [`D${start}:F${end}`]: '#,##0;[Red]-#,##0', [`G${start}:H${end}`]: '$#,##0.00;[Red]-$#,##0.00', [`I${start}:J${end}`]: '0.0%', [`L${start}:M${end}`]: '0.0%;[Red]-0.0%' }); widths(cats, [11, 16, 9, 12, 13, 15, 12, 14, 13, 14, 12, 13, 13], end + 1); cats.freezePanes.freezeRows(4); return { start, end }; }
-const catSheet = writeCatSheet();
-
-function writeTopSheet() { title(top, 'A1:L1', 'BSR Top100 整体汇总 · 公式页'); top.mergeCells('A2:L2'); top.getRange('A2').values = [['每类别、每月独立从rank 1-100池截取不超过100条；2026.07为94父体样本，仅展示。']]; top.getRange('A2:L2').format = { fill: yellow, font: { italic: true, color: '#7F6000' }, wrapText: true }; top.getRange('A4:L4').values = [['月份', '分类', '范围', 'Top100行数', '销量', '销售额', '平均标价', '加权成交均价', '配对覆盖率', 'MOM基准月', '销量MOM/环比', '销售额MOM/环比']]; hdr(top, 'A4:L4'); const start = 5, rows = []; for (const m of months) for (const c of CATEGORIES) rows.push([m, CATEGORY_LABELS[c], m <= '202606' ? '核心' : (m === '202607' ? '展示' : '历史')]); const end = start + rows.length - 1; top.getRange(`A${start}:C${end}`).values = rows; for (let i = 0; i < rows.length; i++) { const r = start + i, m = `A${r}`, c = CATEGORIES[i % 4], basis = months.indexOf(rows[i][0]) >= 12 ? months[months.indexOf(rows[i][0]) - 12] : ''; top.getRange(`D${r}:I${r}`).formulas = [[`=${aSum('O', m, c, 'Top100')}`, `=${aSum('F', m, c, 'Top100')}`, `=${aSum('G', m, c, 'Top100')}`, `=${aPrice(m, c, 'Top100')}`, `=${aWeighted(m, c, 'Top100')}`, `=IFERROR(${aSum('N', m, c, 'Top100')}/D${r},"")`]]; top.getRange(`J${r}`).values = [[basis]]; top.getRange(`K${r}:L${r}`).formulas = [[basis ? `=IFERROR(E${r}/SUMIFS($E$${start}:$E$${end},$A$${start}:$A$${end},J${r},$B$${start}:$B$${end},B${r})-1,"")` : '=""', basis ? `=IFERROR(F${r}/SUMIFS($F$${start}:$F$${end},$A$${start}:$A$${end},J${r},$B$${start}:$B$${end},B${r})-1,"")` : '=""']]; } body(top, `A${start}:L${end}`, { [`D${start}:F${end}`]: '#,##0;[Red]-#,##0', [`G${start}:H${end}`]: '$#,##0.00;[Red]-$#,##0', [`I${start}:I${end}`]: '0.0%', [`K${start}:L${end}`]: '0.0%;[Red]-0.0%' }); widths(top, [11, 16, 9, 12, 13, 15, 12, 14, 13, 12, 13, 13], end + 1); top.freezePanes.freezeRows(4); return { start, end }; }
-const topSheet = writeTopSheet();
-
-function writeTierSheet() { title(tiers, 'A1:M1', 'BSR Top100 头部/中部/尾部 · 公式页'); tiers.mergeCells('A2:M2'); tiers.getRange('A2').values = [['头部=1-20；中部=21-50；尾部=51-100。分层使用同一Top100池，合计可回到Top100。']]; tiers.getRange('A2:M2').format = { fill: yellow, font: { italic: true, color: '#7F6000' }, wrapText: true }; tiers.getRange('A4:M4').values = [['月份', '分类', '分层', '范围', 'Listing行数', '销量', '销售额', '平均标价', '加权成交均价', 'Top100销量份额', 'Top100销售额份额', 'MOM基准月', '销量MOM/环比']]; hdr(tiers, 'A4:M4'); const start = 5, rows = []; for (const m of months) for (const c of CATEGORIES) for (const t of TIERS) rows.push([m, CATEGORY_LABELS[c], t.key, m <= '202606' ? '核心' : (m === '202607' ? '展示' : '历史')]); const end = start + rows.length - 1; tiers.getRange(`A${start}:D${end}`).values = rows; for (let i = 0; i < rows.length; i++) { const r = start + i, m = `A${r}`, c = CATEGORIES[Math.floor(i / 3) % 4], t = TIERS[i % 3], basis = months.indexOf(rows[i][0]) >= 12 ? months[months.indexOf(rows[i][0]) - 12] : ''; tiers.getRange(`E${r}:K${r}`).formulas = [[`=${aSum('O', m, c, t.key)}`, `=${aSum('F', m, c, t.key)}`, `=${aSum('G', m, c, t.key)}`, `=${aPrice(m, c, t.key)}`, `=${aWeighted(m, c, t.key)}`, `=IFERROR(F${r}/${aSum('F',m,c,'Top100')},"")`, `=IFERROR(G${r}/${aSum('G',m,c,'Top100')},"")`]]; tiers.getRange(`L${r}`).values = [[basis]]; tiers.getRange(`M${r}`).formulas = [[basis ? `=IFERROR(F${r}/SUMIFS($F$${start}:$F$${end},$A$${start}:$A$${end},L${r},$B$${start}:$B$${end},B${r},$C$${start}:$C$${end},C${r})-1,"")` : '=""']]; } body(tiers, `A${start}:M${end}`, { [`E${start}:G${end}`]: '#,##0;[Red]-#,##0', [`H${start}:I${end}`]: '$#,##0.00;[Red]-$#,##0', [`J${start}:K${end}`]: '0.0%', [`M${start}:M${end}`]: '0.0%;[Red]-0.0%' }); widths(tiers, [11, 16, 15, 9, 12, 13, 15, 12, 14, 15, 16, 12, 13], end + 1); tiers.freezePanes.freezeRows(4); return { start, end }; }
-const tierSheet = writeTierSheet();
-
-title(brands, 'A1:J1', 'GENIMO 品牌份额 · 公式页'); brands.mergeCells('A2:J2'); brands.getRange('A2').values = [['主指标=GENIMO/整体市场；PP内份额仅作辅助。']]; brands.getRange('A2:J2').format = { fill: yellow, font: { italic: true, color: '#7F6000' }, wrapText: true }; brands.getRange('A4:J4').values = [['月份', '整体销量', 'GENIMO销量', '整体销量份额', '整体销售额', 'GENIMO销售额', '整体销售额份额', 'PP销量', 'GENIMO PP销量', 'PP内销量份额']]; hdr(brands, 'A4:J4'); const bs = 5, be = bs + months.length - 1; brands.getRange(`A${bs}:A${be}`).values = months.map((m) => [m]); for (let i = 0; i < months.length; i++) { const r = bs + i, m = `A${r}`; brands.getRange(`B${r}:J${r}`).formulas = [[`=${aSum('F',m,'overall','全部')}`, `=${aSum('F',m,'genimo','全部')}`, `=IFERROR(C${r}/B${r},"")`, `=${aSum('G',m,'overall','全部')}`, `=${aSum('G',m,'genimo','全部')}`, `=IFERROR(F${r}/E${r},"")`, `=${aSum('F',m,'pp','全部')}`, `=${aSum('F',m,'genimo_pp','全部')}`, `=IFERROR(I${r}/H${r},"")`]]; } body(brands, `A${bs}:J${be}`, { [`B${bs}:C${be}`]: '#,##0;[Red]-#,##0', [`D${bs}:D${be}`]: '0.0%', [`E${bs}:F${be}`]: '$#,##0;[Red]-#,##0', [`G${bs}:G${be}`]: '0.0%', [`H${bs}:I${be}`]: '#,##0;[Red]-#,##0', [`J${bs}:J${be}`]: '0.0%' }); widths(brands, [11, 14, 14, 14, 15, 16, 15, 12, 15, 14], be + 1); brands.freezePanes.freezeRows(4);
-
-title(core, 'A1:M1', '核心周期汇总（2025.01-06 vs 2026.01-06）· 公式页'); core.mergeCells('A2:M2'); core.getRange('A2').values = [['核心所有指标从91_聚合输入公式计算；2026.07不参与核心周期。']]; core.getRange('A2:M2').format = { fill: yellow, font: { italic: true, color: '#7F6000' }, wrapText: true }; core.getRange('A4:M4').values = [['分类', '2025H1销量', '2026H1销量', '销量MOM/环比', '2025H1销售额', '2026H1销售额', '销售额MOM/环比', '2025H1平均标价', '2026H1平均标价', '标价MOM/环比', '2025H1加权成交均价', '2026H1加权成交均价', '加权均价MOM/环比']]; hdr(core, 'A4:M4'); const cs = 5, ce = cs + 3; core.getRange(`A${cs}:A${ce}`).values = CATEGORIES.map((c) => [CATEGORY_LABELS[c]]); for (let i = 0; i < CATEGORIES.length; i++) { const r = cs + i, c = CATEGORIES[i]; core.getRange(`B${r}:M${r}`).formulas = [[`=${aCore('F',c,'202501','202506')}`, `=${aCore('F',c,'202601','202606')}`, `=IFERROR(C${r}/B${r}-1,"")`, `=${aCore('G',c,'202501','202506')}`, `=${aCore('G',c,'202601','202606')}`, `=IFERROR(F${r}/E${r}-1,"")`, `=${corePrice(c,'202501','202506')}`, `=${corePrice(c,'202601','202606')}`, `=IFERROR(I${r}/H${r}-1,"")`, `=${coreWeighted(c,'202501','202506')}`, `=${coreWeighted(c,'202601','202606')}`, `=IFERROR(L${r}/K${r}-1,"")`]]; } body(core, `A${cs}:M${ce}`, { [`B${cs}:C${ce}`]: '#,##0;[Red]-#,##0', [`D${cs}:D${ce}`]: '0.0%', [`E${cs}:F${ce}`]: '$#,##0;[Red]-$#,##0', [`G${cs}:G${ce}`]: '0.0%', [`H${cs}:L${ce}`]: '$#,##0.00;[Red]-$#,##0.00', [`J${cs}:J${ce}`]: '0.0%', [`M${cs}:M${ce}`]: '0.0%' }); widths(core, [16, 14, 14, 14, 15, 15, 15, 15, 15, 14, 18, 18, 16], ce + 1);
-
-title(checks, 'A1:F1', '公式校验与数据完整性'); checks.getRange('A2:F2').values = [['校验项', '结果', '期望/阈值', '实际值', '是否通过', '说明']]; hdr(checks, 'A2:F2'); const checkRows = [['整体=PP+高客单非PP（2026H1销量）', null, 0, null, null, '分类加总必须回到整体。'], ['整体=PP+高客单非PP（2026H1销售额）', null, 0, null, null, '销售额也必须回到整体。'], ['BSR Top100每类别每月≤100', null, 100, null, null, '每月每类独立封顶100。'], ['核心明细行数（2026.01-06）', null, 9365, null, null, '控制值来自当前分析 JSON。'], ['明细总行数（本工作簿输入）', null, detailRows.length, null, null, '90_输入_明细的有效记录数。'], ['缺失销量记录数', null, null, null, null, '缺失值保留为缺失，不按0计入。'], ['缺失销售额记录数', null, null, null, null, '缺失值保留为缺失，不按0计入。']]; checks.getRange('A3:F9').values = checkRows;
-checks.getRange('B3:B9').formulas = [[`='07_核心汇总'!C5-('07_核心汇总'!C6+'07_核心汇总'!C7)`], [`='07_核心汇总'!F5-('07_核心汇总'!F6+'07_核心汇总'!F7)`], [`=MAX('02_BSR整体'!D5:D${topSheet.end})`], [`=COUNTIFS('90_输入_明细'!$A$3:$A$${inputEnd},">=202601",'90_输入_明细'!$A$3:$A$${inputEnd},"<=202606")`], [`=COUNTA('90_输入_明细'!$A$3:$A$${inputEnd})`], [`=COUNTIF('90_输入_明细'!$Q$3:$Q$${inputEnd},0)`], [`=COUNTIF('90_输入_明细'!$R$3:$R$${inputEnd},0)`]];
-checks.getRange('D3:D9').formulas = [['=ABS(B3)'], ['=ABS(B4)'], ['=B5'], ['=B6'], ['=B7'], ['=B8'], ['=B9']]; checks.getRange('E3:E9').formulas = [['=IF(D3<0.5,"通过","失败")'], ['=IF(D4<0.5,"通过","失败")'], ['=IF(D5<=C5,"通过","失败")'], ['=IF(D6=C6,"通过","请复核")'], ['=IF(D7=C7,"通过","失败")'], ['=IF(D8>=0,"通过","失败")'], ['=IF(D9>=0,"通过","失败")']]; checks.getRange('E3:E9').conditionalFormats.add('containsText', { text: '失败', format: { fill: red, font: { color: '#9C0006', bold: true } } }); checks.getRange('E3:E9').conditionalFormats.add('containsText', { text: '通过', format: { fill: green, font: { color: '#006100', bold: true } } }); body(checks, 'A3:F9'); widths(checks, [34, 15, 14, 15, 12, 56], 10);
-
-title(decisions, 'A1:E1', '经营决策提示 · 公式联动'); decisions.mergeCells('A2:E2'); decisions.getRange('A2').values = [['行动提示来自核心汇总、分层和品牌份额；链接数量需输入目标后再分配，预测不等于历史实绩。']]; decisions.getRange('A2:E2').format = { fill: yellow, font: { italic: true, color: '#7F6000' }, wrapText: true }; decisions.getRange('A4:E4').values = [['主题', '公式结果', '动态提示', '建议动作', '限制/复核点']]; hdr(decisions, 'A4:E4'); decisions.getRange('A5:E10').values = [['整体市场销量方向', null, null, '整体结论先看全市场销量和销售额，再看分类、Top100和分层。', '2025行级与2026父体快照统计单元不同，市场DB结果只作方向性参考。'], ['PP销量/销售额方向', null, null, '销量和销售额若均下降，先拆价格、转化、广告和SKU结构；不要用单一均价解释。', '加权成交均价=配对销售额÷配对销量；平均标价是另一指标。'], ['高客单非PP方向', null, null, '高客单非PP是排除PP后的全部剩余产品，用整体份额与层级决定投入。', '分类必须与整体加总一致。'], ['BSR层级优先测试', null, null, '优先测试销量/销售额同比为正且份额扩大的层级；尾部若低基数，先小额验证。', '历史行级Top100可能有重复Listing。'], ['GENIMO整体市场份额', null, null, '以整体市场为分母监控份额；下滑时优先补强有增长层级的中流链接。', 'PP内份额只作辅助。'], ['链接规划输入', 0, null, '在B10输入计划链接总数，再按核心销量份额分配头、中、尾链接。', '0表示尚未给定目标；还需复核利润、库存、广告容量。']]; decisions.getRange('B5:B9').formulas = [[`='07_核心汇总'!D5`], [`='07_核心汇总'!D6`], [`='07_核心汇总'!D7`], [`=MAX('03_BSR头中尾'!M5:M${tierSheet.end})`], [`=IFERROR('07_核心汇总'!C8/'07_核心汇总'!C5,"")`]]; decisions.getRange('C5:C10').formulas = [['=IF(B5>0,"2026H1销量较2025H1为正","2026H1销量较2025H1为负或不可比")'], ['=IF(B6>0,"PP销量增长","PP销量下降；均价需分开看")'], ['=IF(B7>0,"高客单非PP销量增长","高客单非PP销量下降")'], ['=IF(B8>0,"至少一个层级出现正向分层MOM，优先做小额测款","未发现正向层级，先查数据与样本")'], ['=IF(B9>=0.2,"GENIMO整体份额达到20%或以上","GENIMO整体份额低于20%，以份额防守和中流链接为先")'], ['=IF(B10>0,"已输入目标，可按份额分配","请输入计划链接总数后再计算分配")']]; decisions.getRange('B10').format = { fill: yellow, font: { bold: true, color: '#7F6000' }, numberFormat: '#,##0' }; body(decisions, 'A5:E10'); decisions.getRange('B5:B9').format.numberFormat = '0.0%;[Red]-0.0%'; widths(decisions, [24, 18, 44, 60, 58], 12);
-
-title(overview, 'A1:H1', '户外地垫市场分析 · 公式版结果'); overview.mergeCells('A2:H2'); overview.getRange('A2').values = [['领导验收先看本页；参考 workbook 只作独立参考，不作为本项目明细真值。']]; overview.getRange('A2:H2').format = { fill: yellow, font: { italic: true, color: '#7F6000' }, wrapText: true }; overview.getRange('A4:H4').values = [['核心指标', '2025H1', '2026H1', 'MOM/环比', '数据状态', '公式/来源', '领导验收参考', '参考结果']]; hdr(overview, 'A4:H4'); overview.getRange('A5:H10').values = [['整体市场销量', null, null, null, 'market.db明细参考', '07_核心汇总!B5:D5', '计划部BI全类目销量', (benchmark.industry?.growthPct ?? null) / 100], ['整体市场销售额', null, null, null, 'market.db明细参考', '07_核心汇总!E5:G5', '计划部未提供销售额', null], ['PP销量', null, null, null, 'market.db分类计算', '07_核心汇总!B6:D6', '分类拆解', null], ['高客单非PP销量', null, null, null, 'market.db分类计算', '07_核心汇总!B7:D7', '分类拆解', null], ['GENIMO整体销量份额', null, null, null, '整体市场为分母', '05_品牌份额', '品牌主口径', null], ['BSR Top100整体销量', null, null, null, '独立Top100池', '02_BSR整体', '计划部BSR参考', (benchmark.bsrTop100?.growthPct ?? null) / 100]]; overview.getRange('B5:D8').formulas = [[`='07_核心汇总'!B5`,`='07_核心汇总'!C5`,`='07_核心汇总'!D5`],[`='07_核心汇总'!E5`,`='07_核心汇总'!F5`,`='07_核心汇总'!G5`],[`='07_核心汇总'!B6`,`='07_核心汇总'!C6`,`='07_核心汇总'!D6`],[`='07_核心汇总'!B7`,`='07_核心汇总'!C7`,`='07_核心汇总'!D7`]]; overview.getRange('B9:C9').formulas = [[`=IFERROR('07_核心汇总'!B8/'07_核心汇总'!B5,"")`,`=IFERROR('07_核心汇总'!C8/'07_核心汇总'!C5,"")`]]; overview.getRange('D9').formulas = [['=IFERROR(C9/B9-1,"")']]; overview.getRange('B10:D10').formulas = [[`=SUMIFS('02_BSR整体'!$E$${topSheet.start}:$E$${topSheet.end},'02_BSR整体'!$A$${topSheet.start}:$A$${topSheet.end},">=202501",'02_BSR整体'!$A$${topSheet.start}:$A$${topSheet.end},"<=202506",'02_BSR整体'!$B$${topSheet.start}:$B$${topSheet.end},"整体市场")`, `=SUMIFS('02_BSR整体'!$E$${topSheet.start}:$E$${topSheet.end},'02_BSR整体'!$A$${topSheet.start}:$A$${topSheet.end},">=202601",'02_BSR整体'!$A$${topSheet.start}:$A$${topSheet.end},"<=202606",'02_BSR整体'!$B$${topSheet.start}:$B$${topSheet.end},"整体市场")`, '=IFERROR(C10/B10-1,"")']]; overview.getRange('H5:H10').format.numberFormat = '0.0%;[Red]-0.0%'; overview.getRange('B5:C8').format.numberFormat = '#,##0;[Red]-#,##0'; overview.getRange('D5:D8').format.numberFormat = '0.0%;[Red]-0.0%'; overview.getRange('B9:D9').format.numberFormat = '0.0%;[Red]-0.0%'; overview.getRange('B10:C10').format.numberFormat = '#,##0;[Red]-#,##0'; overview.getRange('D10').format.numberFormat = '0.0%;[Red]-0.0%'; overview.getRange('A12:F12').values = [['关键逻辑校验', '结果', '阈值/基准', '实际差额', '状态', '说明']]; hdr(overview, 'A12:F12'); overview.getRange('A13:F16').values = [['整体=PP+高客单非PP（销量）', null, 0, null, null, '分类加总必须回到整体。'], ['整体=PP+高客单非PP（销售额）', null, 0, null, null, '销售额同样复核。'], ['BSR Top100最大行数', null, 100, null, null, '每类别每月不超过100。'], ['核心明细行数', null, 9365, null, null, '与当前JSON控制值对比。']]; overview.getRange('B13:B16').formulas = [[`='08_校验'!B3`],[`='08_校验'!B4`],[`='08_校验'!B5`],[`='08_校验'!B6`]]; overview.getRange('D13:D16').formulas = [[`='08_校验'!D3`],[`='08_校验'!D4`],[`='08_校验'!D5`],[`='08_校验'!D6`]]; overview.getRange('E13:E16').formulas = [[`='08_校验'!E3`],[`='08_校验'!E4`],[`='08_校验'!E5`],[`='08_校验'!E6`]]; overview.getRange('A18:H18').values = [['当前阅读顺序', null, null, null, null, null, null, null]]; overview.mergeCells('A18:H18'); overview.getRange('A18:H18').format = { fill: navy, font: { bold: true, color: '#FFFFFF' } }; overview.getRange('A19:H22').values = [['1', '先看整体与分类加总，再看02/03的Top100和头中尾。', null, null, null, null, null, null], ['2', '如果两个分类均为负而整体为正，先查看08_校验，不能用均价上升掩盖销量/销售额矛盾。', null, null, null, null, null, null], ['3', 'GENIMO主份额在05页以整体市场为分母；PP内份额是辅助指标。', null, null, null, null, null, null], ['4', '2026.01-06是核心实绩；2026.07为94父体展示样本。', null, null, null, null, null, null]]; for (let r = 19; r <= 22; r++) overview.mergeCells(`B${r}:H${r}`); overview.getRange('A19:H22').format = { wrapText: true, fill: '#F7FBFF', borders: { insideHorizontal: { style: 'thin', color: '#D9E2F3' } } }; widths(overview, [28, 15, 15, 14, 18, 28, 22, 16], 24);
-
-title(rules, 'A1:H1', '来源、数据操作和规则登记'); rules.getRange('A3:H3').values = [['项目', '当前值/规则', '来源文件/表', '计算或操作', '是否写入原始数据', '可复核位置', '限制', '备注']]; hdr(rules, 'A3:H3'); const ruleRows = [['主源工作簿', meta.source_file || '地垫-卖家精灵市场数据.xlsx', 'data/raw/地垫-卖家精灵市场数据.xlsx', '只读导入market.db；本次不改写源文件', '否', '90_输入_明细', '2025行级含变体；与2026父体快照统计单元不同', '缺失保留为空'], ['2026替换链', '2026.01-07', 'Competitor-US-2026.*.xlsx + competitor_809440.db', '保留raw镜像；父ASIN优先、缺省ASIN确定性去重；代表行进入market.db', '否（仅派生DB）', 'analysis_replacements + 90/91页', '2026.07为94父体样本', '当前结果使用替换后输入'], ['去重逻辑', '父ASIN优先，缺省ASIN；最小可解析小类BSR；同名次优先指标完整行；再按源行', 'src/build_competitor_db.js', '只对2026替换快照执行；历史行级不自动父体去重', '否', '90页Listing键 / 92页说明', '历史父体语义待业务确认', '原始raw仍保留'], ['BSR解析', '正整数；允许N.0；拒绝非零小数；多值取最小正整数', 'src/analyze_market.js / src/build_competitor_db.js', '2026类别排名使用同父体变体最佳小类BSR；Top100稳定截取100', '否', '90页M:P / 91页层级', '历史排名可能重复Listing', '分层不跨池'], ['分类', 'PP=标题完整单词plastic；高客单非PP=排除PP后的全部产品；GENIMO=品牌', 'SPEC 1.1/7.5', '类别结果由91页公式引用；PP+高客单必须回到整体', '否', '04/07/08页', '不要将高客单缩成丙纶/三明治', '品牌主份额用整体分母'], ['均价', '平均标价 + 配对加权成交均价', 'SPEC 1.2', '平均标价=价格合计/有效价格数；加权成交均价=配对销售额/配对销量', '否', '01/02/03/04/07公式', '缺失值不按0进入分母', '二者不混称客单价'], ['MOM/环比', '当前月 vs 去年同月', 'SPEC 0.3/1.2', '例如2026.02 vs 2025.02；不展示本月vs上月连续环比', '否', '01/02/03/04公式', '首年月份无基准为空', '保留基准月'], ['核心截止', '202606', 'SPEC 1.2', '2026.01-06为核心；2026.07仅展示', '否', '各页范围列', '不得静默延长', '与JSON一致'], ['领导参考', '参考workbook不是本项目明细验收真值', '新增参考的材料和内容/销量预测计划部底表-户外地垫.xlsx', '独立参考的分子/分母/增速保留在00的H列；不覆盖market.db', '否', '00概览/92本行', '未提供销售额/均价，不推导', '正负结果并列呈现'], ['本次数据操作', '只读market.db与竞品DB；写入90明细、91聚合和结果公式页', '本次生成脚本', '未修改data/raw；未删除审计记录', '否', '90/91/92', 'Excel打开后可重算公式', '结果集中在一份xlsx']]; rules.getRange(`A4:H${3 + ruleRows.length}`).values = ruleRows; rules.getRange(`A4:H${3 + ruleRows.length}`).format = { wrapText: true, borders: { insideHorizontal: { style: 'thin', color: '#E7E6E6' } } }; widths(rules, [18, 34, 46, 58, 16, 28, 44, 34], 4 + ruleRows.length); rules.freezePanes.freezeRows(3);
-
-await wb.recalculate();
-const check = await wb.inspect({ kind: 'table', range: '00_概览!A1:H22', include: 'values,formulas', tableMaxRows: 22, tableMaxCols: 8, maxChars: 22000 }); console.log(check.ndjson.slice(0, 18000));
-const errors = await wb.inspect({ kind: 'match', searchTerm: '#REF!|#DIV/0!|#VALUE!|#NAME\\?|#N/A', options: { useRegex: true, maxResults: 200 }, summary: 'formula error scan' }); console.log(errors.ndjson);
-await fs.mkdir(OUT_DIR, { recursive: true }); const preview = await wb.render({ sheetName: '00_概览', range: 'A1:H22', scale: 1.2, format: 'png' }); await fs.writeFile(PREVIEW_PATH, new Uint8Array(await preview.arrayBuffer())); const out = await SpreadsheetFile.exportXlsx(wb); await out.save(OUT_PATH);
-console.log(JSON.stringify({ outputPath: OUT_PATH, previewPath: PREVIEW_PATH, detailRows: detailRows.length, aggregateRows: aggregateRows.length, months, benchmark: { industry: benchmark.industry?.growthPct ?? null, bsrTop100: benchmark.bsrTop100?.growthPct ?? null } }, null, 2)); db.close(); cdb.close();
+await fs.mkdir(OUT_DIR,{recursive:true});
+wb.SheetNames=['00_总览与结论','01_整体市场-月度年度','02_整体市场-BSR前100','03_整体市场-BSR分层','04_PP管-月度年度','05_PP管-BSR前100','06_PP管-BSR分层','07_非PP高客单-月度年度','08_非PP高客单-BSR前100','09_非PP高客单-BSR分层','10_GENIMO-品牌份额','11_GENIMO-进退层','12_GENIMO-2027规划','90_输入_明细','91_聚合输入','92_校验','93_来源与规则'];
+wb.Workbook={CalcPr:{calcMode:'auto',fullCalcOnLoad:true,forceFullCalc:true}};
+XLSX.writeFile(wb,OUT,{bookType:'xlsx',compression:true,cellStyles:true});
+console.log(JSON.stringify({outputPath:OUT,sourceMonths:months,displayMonths:display,detailRows:details.length,aggregateRows:aggs.length,cohort:{retained:retained.length,exited:exited.length,entered:entered.length},core:{overall2025H1:sumCache('sales','overall','全部','202501','202506'),overall2026H1:sumCache('sales','overall','全部','202601','202606'),pp2025H1:sumCache('sales','pp','全部','202501','202506'),pp2026H1:sumCache('sales','pp','全部','202601','202606'),nonpp2025H1:sumCache('sales','nonpp','全部','202501','202506'),nonpp2026H1:sumCache('sales','nonpp','全部','202601','202606')}},null,2));
+db.close();cdb.close();
