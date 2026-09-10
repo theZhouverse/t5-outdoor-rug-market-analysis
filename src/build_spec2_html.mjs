@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import XLSX from 'xlsx';
 
 const ROOT = process.cwd();
 const SOURCE = path.join(ROOT, 'data', 'raw', '地垫-卖家精灵市场数据.xlsx');
 const OUTPUT = path.join(ROOT, '交付', '户外地垫市场分析报告-优化版.html');
+const SOURCE_HASH = fs.existsSync(SOURCE) ? crypto.createHash('sha256').update(fs.readFileSync(SOURCE)).digest('hex') : '';
 
 const MONTHS = [];
 const BANDS = [
@@ -648,7 +650,7 @@ function buildHtml(raw, categories) {
   html += '<nav><a href="#overall">一、整体市场</a><a href="#pp">二、PP市场</a><a href="#nonpp">三、非PP市场</a><a href="#genimo">四、GENIMO品牌</a></nav><main>';
   html += '<div class="notice"><b>口径说明：</b>整体市场 = PP市场 ∪ 非PP市场；PP 使用商品标题中完整单词 plastic 匹配，非PP为其补集。BSR Top100 先解析并标记小类BSR 1—100（包含100），再做去重和汇总。月度同比比较去年同月，月度环比比较上一个自然月。</div>';
   html += '<div class="notice"><b>数据边界：</b>本版本只读取原始工作簿已有字段，不计算利润、成本、广告、库存或其他外部指标；原始空值保留为空，不当作零。原始毛利率、FBA、Coupon 如需查看，应回到输入工作簿核对。</div>';
-  html += '<div class="meta"><b>来源与处理记录</b><br>主源：' + esc(SOURCE) + '<br>月度子表：' + MONTHS.length + ' 张（' + esc(MONTHS[0]) + '—' + esc(MONTHS[MONTHS.length - 1]) + '）<br>原始有效行：' + fmt(rawCount) + '；可解析小类BSR：' + fmt(ranked) + '；BSR 1—100候选行：' + fmt(topCandidates) + '<br>统计单元：独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）；代表行按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。</div>';
+  html += '<div class="meta"><b>来源与处理记录</b><br>主源：' + esc(SOURCE) + '<br>主源 SHA-256：' + esc(SOURCE_HASH) + '<br>月度子表：' + MONTHS.length + ' 张（' + esc(MONTHS[0]) + '—' + esc(MONTHS[MONTHS.length - 1]) + '）<br>原始有效行：' + fmt(rawCount) + '；可解析小类BSR：' + fmt(ranked) + '；BSR 1—100候选行：' + fmt(topCandidates) + '<br>统计单元：独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）；代表行按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。</div>';
   html += '<h3>原始字段覆盖（只读）</h3>' + rawFieldCoverage(raw.rows);
   html += marketSection('overall', '第一部分', categories.overall, categories.overall, categories.pp, categories.nonpp);
   html += marketSection('pp', '第二部分', categories.pp, categories.overall, categories.pp, categories.nonpp);
@@ -707,6 +709,7 @@ console.log(JSON.stringify({
   output: OUTPUT,
   months: MONTHS.length,
   rawRows: raw.rows.length,
+  sourceSha256: SOURCE_HASH,
   fullDedup: fullDedup.length,
   top100Dedup: topDedup.length,
   categories: Object.fromEntries(Object.entries(categories).map(([k, v]) => [k, { full: v.fullRows.length, top100: v.topRows.length }]))
