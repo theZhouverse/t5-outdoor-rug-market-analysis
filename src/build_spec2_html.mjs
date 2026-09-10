@@ -670,6 +670,16 @@ const categories = {
   genimo: buildCategory('GENIMO品牌', fullDedup.filter((r) => r.genimo), topDedup.filter((r) => r.genimo)),
   genimoPP: buildCategory('GENIMO PP市场', fullDedup.filter((r) => r.genimo && r.plastic), topDedup.filter((r) => r.genimo && r.plastic))
 };
+function addMetric(a, b) {
+  if (Number.isFinite(a) && Number.isFinite(b)) return a + b;
+  if (Number.isFinite(a)) return a;
+  if (Number.isFinite(b)) return b;
+  return null;
+}
+function metricEqual(a, b) {
+  if (!Number.isFinite(a) && !Number.isFinite(b)) return true;
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 1e-6;
+}
 for (let i = 0; i < MONTHS.length; i += 1) {
   const overallMonth = categories.overall.monthly[i];
   const ppMonth = categories.pp.monthly[i];
@@ -677,7 +687,16 @@ for (let i = 0; i < MONTHS.length; i += 1) {
   const overallTop = categories.overall.topMonthly[i];
   const ppTop = categories.pp.topMonthly[i];
   const nonppTop = categories.nonpp.topMonthly[i];
-  if (overallMonth.count !== ppMonth.count + nonppMonth.count || overallTop.count !== ppTop.count + nonppTop.count) {
+  const fullSales = addMetric(ppMonth.sales, nonppMonth.sales);
+  const fullRevenue = addMetric(ppMonth.revenue, nonppMonth.revenue);
+  const topSales = addMetric(ppTop.sales, nonppTop.sales);
+  const topRevenue = addMetric(ppTop.revenue, nonppTop.revenue);
+  if (overallMonth.count !== ppMonth.count + nonppMonth.count ||
+      overallTop.count !== ppTop.count + nonppTop.count ||
+      !metricEqual(overallMonth.sales, fullSales) ||
+      !metricEqual(overallMonth.revenue, fullRevenue) ||
+      !metricEqual(overallTop.sales, topSales) ||
+      !metricEqual(overallTop.revenue, topRevenue)) {
     throw new Error('PP/非PP互补校验失败: ' + MONTHS[i]);
   }
 }
