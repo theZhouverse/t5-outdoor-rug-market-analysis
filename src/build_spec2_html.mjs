@@ -200,7 +200,15 @@ function readRawRows() {
         plastic: isPlasticTitle(values[idx.title]),
         genimo: isGenimo(values[idx.brand])
       };
-      if (!row.asin && !row.parent && !row.title && !row.brand && row.rank === null) continue;
+      // Some exports append a human-readable note below the data table in
+      // the ASIN column (for example, a duplicate-removal explanation). Keep
+      // legitimate rows whose ASIN is present but all metrics are blank, yet
+      // drop note-only rows that have no product text or numeric field.
+      const hasBusinessText = Boolean(row.asin || row.parent || row.title || row.brand || row.sku);
+      const hasDataMetric = [row.rank, row.sales, row.revenue, row.price, row.fba]
+        .some((value) => Number.isFinite(value));
+      const plausibleAsin = /^[A-Z0-9]{8,15}$/i.test(row.asin);
+      if ((!hasBusinessText && !hasDataMetric) || (!plausibleAsin && !row.parent && !row.title && !row.brand && !row.sku && !hasDataMetric)) continue;
       allRows.push(row);
       rowCount += 1;
       if (row.rank !== null) rankCount += 1;
