@@ -398,6 +398,14 @@ function lastNonEmpty(rows) {
   return rows.slice().reverse().find((r) => r.count > 0) || rows[rows.length - 1];
 }
 
+function chartMonthLabel(month) {
+  return String(month).slice(0, 4) + '.' + Number(String(month).slice(4, 6));
+}
+
+function chartValueLabel(value, percentMode = false, digits = 2) {
+  return percentMode ? fmtPct(value) : fmt(value, digits);
+}
+
 function svgBarChart(title, rows, field, color, digits) {
   const values = rows.map((r) => Number.isFinite(r[field]) ? r[field] : 0);
   const max = Math.max(...values, 0);
@@ -408,19 +416,28 @@ function svgBarChart(title, rows, field, color, digits) {
   const plotH = 170;
   const plotW = width - left - 18;
   const barW = rows.length ? Math.max(2, plotW / rows.length - 2) : 2;
-  let body = '<div class="chart"><h4>' + esc(title) + '</h4><svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + esc(title) + '">';
-  body += '<line x1="' + left + '" y1="' + (height - bottom) + '" x2="' + width + '" y2="' + (height - bottom) + '" stroke="#94a3b8"/>';
+  const chartMax = max > 0 ? max : 1;
+  let body = '<div class="chart interactive-chart" data-chart-kind="bar"><div class="chart-head"><h4>' + esc(title) + '</h4><span class="chart-hint">悬停或按 Tab 聚焦</span></div><div class="chart-stage"><svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + esc(title) + '" data-interactive-chart="bar">';
+  for (const ratio of [0, 0.25, 0.5, 0.75, 1]) {
+    const y = height - bottom - ratio * plotH;
+    body += '<line class="chart-grid-line" x1="' + left + '" y1="' + y.toFixed(1) + '" x2="' + width + '" y2="' + y.toFixed(1) + '"/>';
+    body += '<text x="8" y="' + (y + 4).toFixed(1) + '" class="axis-label">' + esc(fmt(chartMax * ratio, digits)) + '</text>';
+  }
   rows.forEach((row, i) => {
     const value = values[i];
-    const h = max > 0 ? (value / max) * plotH : 0;
+    const h = max > 0 ? (value / chartMax) * plotH : 0;
     const x = left + i * (plotW / Math.max(rows.length, 1)) + 1;
     const y = height - bottom - h;
-    body += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="2" fill="' + color + '"><title>' + esc(row.month + '：' + fmt(row[field], digits)) + '</title></rect>';
+    const label = chartMonthLabel(row.month);
+    const valueLabel = chartValueLabel(row[field], false, digits);
+    const tooltip = label + '  ·  ' + valueLabel;
+    const cx = x + barW / 2;
+    body += '<rect class="chart-mark chart-bar" data-chart-point data-chart-index="' + i + '" data-x="' + cx.toFixed(1) + '" data-label="' + esc(label) + '" data-tooltip="' + esc(tooltip) + '" tabindex="0" role="img" aria-label="' + esc(tooltip) + '" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="2" fill="' + color + '"><title>' + esc(tooltip) + '</title></rect>';
     if (i % Math.max(1, Math.ceil(rows.length / 10)) === 0) {
-      body += '<text x="' + (x + barW / 2).toFixed(1) + '" y="' + (height - 17) + '" text-anchor="middle" class="axis-label">' + esc(row.month.slice(0, 4) + '.' + Number(row.month.slice(4, 6))) + '</text>';
+      body += '<text x="' + cx.toFixed(1) + '" y="' + (height - 17) + '" text-anchor="middle" class="axis-label">' + esc(label) + '</text>';
     }
   });
-  body += '<text x="8" y="18" class="axis-label">' + esc(max > 0 ? fmt(max, digits) : '—') + '</text></svg></div>';
+  body += '</svg><div class="chart-hoverline" aria-hidden="true"></div><div class="chart-tooltip" role="tooltip" hidden></div></div><div class="chart-readout" aria-live="polite">悬停或聚焦任意月份查看精确值</div></div>';
   return body;
 }
 
@@ -440,32 +457,47 @@ function svgLineChart(title, rows, series, percentMode = false) {
   if (min === max) { min -= 1; max += 1; }
   const scaleX = (i) => left + (rows.length <= 1 ? 0 : i * plotW / (rows.length - 1));
   const scaleY = (v) => top + (max - v) * plotH / (max - min);
-  let body = '<div class="chart"><h4>' + esc(title) + '</h4><svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + esc(title) + '">';
+  let body = '<div class="chart interactive-chart" data-chart-kind="line"><div class="chart-head"><h4>' + esc(title) + '</h4><span class="chart-hint">悬停或按 Tab 聚焦</span></div><div class="chart-stage"><svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + esc(title) + '" data-interactive-chart="line">';
+  for (const ratio of [0, 0.25, 0.5, 0.75, 1]) {
+    const y = top + ratio * plotH;
+    const value = max - ratio * (max - min);
+    body += '<line class="chart-grid-line" x1="' + left + '" y1="' + y.toFixed(1) + '" x2="' + (width - right) + '" y2="' + y.toFixed(1) + '"/>';
+    body += '<text x="8" y="' + (y + 4).toFixed(1) + '" class="axis-label">' + esc(chartValueLabel(value, percentMode)) + '</text>';
+  }
   if (min < 0 && max > 0) {
     const y0 = scaleY(0);
-    body += '<line x1="' + left + '" y1="' + y0.toFixed(1) + '" x2="' + (width - right) + '" y2="' + y0.toFixed(1) + '" stroke="#cbd5e1" stroke-dasharray="4 4"/>';
+    body += '<line class="chart-zero-line" x1="' + left + '" y1="' + y0.toFixed(1) + '" x2="' + (width - right) + '" y2="' + y0.toFixed(1) + '"/>';
   }
-  body += '<line x1="' + left + '" y1="' + top + '" x2="' + left + '" y2="' + (height - bottom) + '" stroke="#94a3b8"/>';
+  body += '<line class="chart-axis-line" x1="' + left + '" y1="' + top + '" x2="' + left + '" y2="' + (height - bottom) + '"/>';
   for (const item of series) {
     const points = rows.map((row, i) => Number.isFinite(row[item.field]) ? scaleX(i).toFixed(1) + ',' + scaleY(row[item.field]).toFixed(1) : null).filter(Boolean);
-    if (points.length > 1) body += '<polyline fill="none" stroke="' + item.color + '" stroke-width="2.5" points="' + points.join(' ') + '"/>';
+    if (points.length > 1) body += '<polyline class="chart-line" fill="none" stroke="' + item.color + '" stroke-width="2.5" points="' + points.join(' ') + '"/>';
     rows.forEach((row, i) => {
       if (Number.isFinite(row[item.field])) {
-        body += '<circle cx="' + scaleX(i).toFixed(1) + '" cy="' + scaleY(row[item.field]).toFixed(1) + '" r="2.8" fill="' + item.color + '"><title>' + esc(row.month + '：' + (percentMode ? fmtPct(row[item.field]) : fmt(row[item.field], 2))) + '</title></circle>';
+        const label = chartMonthLabel(row.month);
+        const valueLabel = chartValueLabel(row[item.field], percentMode);
+        body += '<circle class="chart-point" data-chart-index="' + i + '" data-x="' + scaleX(i).toFixed(1) + '" cx="' + scaleX(i).toFixed(1) + '" cy="' + scaleY(row[item.field]).toFixed(1) + '" r="3.4" fill="' + item.color + '"><title>' + esc(label + '  ·  ' + item.name + '：' + valueLabel) + '</title></circle>';
       }
     });
   }
   const step = Math.max(1, Math.ceil(rows.length / 10));
   rows.forEach((row, i) => {
-    if (i % step === 0) body += '<text x="' + scaleX(i).toFixed(1) + '" y="' + (height - 17) + '" text-anchor="middle" class="axis-label">' + esc(row.month.slice(0, 4) + '.' + Number(row.month.slice(4, 6))) + '</text>';
+    if (i % step === 0) body += '<text x="' + scaleX(i).toFixed(1) + '" y="' + (height - 17) + '" text-anchor="middle" class="axis-label">' + esc(chartMonthLabel(row.month)) + '</text>';
   });
   series.forEach((item, i) => {
     const x = left + i * 155;
     body += '<rect x="' + x + '" y="8" width="12" height="12" fill="' + item.color + '"/><text x="' + (x + 17) + '" y="18" class="legend-label">' + esc(item.name) + '</text>';
   });
-  body += '<text x="8" y="' + (top + 5) + '" class="axis-label">' + esc(percentMode ? fmtPct(max) : fmt(max, 0)) + '</text>';
-  body += '<text x="8" y="' + (height - bottom) + '" class="axis-label">' + esc(percentMode ? fmtPct(min) : fmt(min, 0)) + '</text>';
-  body += '</svg></div>';
+  rows.forEach((row, i) => {
+    const label = chartMonthLabel(row.month);
+    const tooltip = [label].concat(series.map((item) => item.name + '：' + chartValueLabel(row[item.field], percentMode))).join('\n');
+    const x = scaleX(i);
+    const slot = plotW / Math.max(rows.length, 1);
+    const hitX = i === 0 ? left : x - slot / 2;
+    const hitWidth = i === 0 || i === rows.length - 1 ? slot / 2 : slot;
+    body += '<rect class="chart-hit" data-chart-point data-chart-index="' + i + '" data-x="' + x.toFixed(1) + '" data-label="' + esc(label) + '" data-tooltip="' + esc(tooltip) + '" tabindex="0" role="img" aria-label="' + esc(tooltip.replace(/\n/g, '；')) + '" x="' + hitX.toFixed(1) + '" y="' + top + '" width="' + Math.max(8, hitWidth).toFixed(1) + '" height="' + plotH + '"></rect>';
+  });
+  body += '</svg><div class="chart-hoverline" aria-hidden="true"></div><div class="chart-tooltip" role="tooltip" hidden></div></div><div class="chart-readout" aria-live="polite">悬停或聚焦任意月份查看精确值</div></div>';
   return body;
 }
 
@@ -487,6 +519,26 @@ function table(headers, rows) {
 // generated artifact.
 function subsection(id, label, body, open = true) {
   return '<details id="' + esc(id) + '" class="subsection"' + (open ? ' open' : '') + '><summary>' + esc(label) + '</summary>' + body + '</details>';
+}
+
+// Small, dependency-free viewer runtime for the generated SVG charts. It
+// follows Archify's interaction pattern: semantic data attributes on SVG
+// marks, a single stateful hover/focus layer, and keyboard-accessible targets.
+function chartRuntimeScript() {
+  return String.raw`(function(){
+var root=document.documentElement,button=document.getElementById("theme-toggle"),saved="dark";
+try{saved=localStorage.getItem("market-report-theme")||"dark"}catch(e){}
+root.dataset.theme=saved;button.textContent=saved==="dark"?"☀":"☾";
+button.addEventListener("click",function(){var next=root.dataset.theme==="dark"?"light":"dark";root.dataset.theme=next;button.textContent=next==="dark"?"☀":"☾";try{localStorage.setItem("market-report-theme",next)}catch(e){}});
+var links=[].slice.call(document.querySelectorAll(".sidebar nav a")),groups=[].slice.call(document.querySelectorAll(".nav-group")),targets=[].slice.call(document.querySelectorAll(".subsection[id],section[id]"));
+function openTarget(id){var el=document.getElementById(id);if(!el)return;var details=el.closest("details");if(details)details.open=true;var section=el.closest("section");if(section){var group=document.querySelector('.nav-group[data-target="'+section.id+'"]');if(group)group.open=true}el.scrollIntoView({behavior:"smooth",block:"start"})}
+links.forEach(function(a){a.addEventListener("click",function(){openTarget(a.getAttribute("href").slice(1))})});
+function setActive(el){var id=el.id;links.forEach(function(a){a.classList.toggle("is-active",a.getAttribute("href")==="#"+id)});var section=el.closest("section[id]"),sectionId=section?section.id:(el.matches("section[id]")?el.id:null);groups.forEach(function(group){group.classList.toggle("is-active",!!sectionId&&group.dataset.target===sectionId)})}
+if("IntersectionObserver" in window){var observer=new IntersectionObserver(function(entries){entries.forEach(function(entry){if(entry.isIntersecting)setActive(entry.target)})},{rootMargin:"-18% 0px -68% 0px"});targets.forEach(function(el){observer.observe(el)})}
+function clearChart(chart){var tip=chart.querySelector(".chart-tooltip"),line=chart.querySelector(".chart-hoverline"),readout=chart.querySelector(".chart-readout");if(tip)tip.hidden=true;if(line)line.classList.remove("is-visible");chart.querySelectorAll("[data-chart-index]").forEach(function(mark){mark.classList.remove("is-active")});if(readout)readout.textContent="悬停或聚焦任意月份查看精确值"}
+function showChart(chart,mark){var tip=chart.querySelector(".chart-tooltip"),line=chart.querySelector(".chart-hoverline"),readout=chart.querySelector(".chart-readout"),stage=chart.querySelector(".chart-stage"),svg=chart.querySelector("svg");if(!tip||!stage||!svg)return;var index=mark.getAttribute("data-chart-index"),text=mark.getAttribute("data-tooltip")||"",x=Number(mark.getAttribute("data-x"));chart.querySelectorAll("[data-chart-index]").forEach(function(item){item.classList.toggle("is-active",item.getAttribute("data-chart-index")===index)});tip.textContent=text;tip.hidden=false;var vb=svg.viewBox.baseVal,sr=svg.getBoundingClientRect(),wr=stage.getBoundingClientRect(),localX=(x-vb.x)/vb.width*sr.width+sr.left-wr.left;if(line){line.style.left=localX+"px";line.classList.add("is-visible")}var maxLeft=Math.max(8,stage.clientWidth-(tip.offsetWidth||230)-8);tip.style.left=Math.min(maxLeft,Math.max(8,localX+12))+"px";tip.style.top="8px";if(readout)readout.textContent=text.replace(/\n/g,"  ·  ")}
+document.querySelectorAll(".interactive-chart").forEach(function(chart){chart.addEventListener("pointerover",function(event){var mark=event.target.closest("[data-chart-point]");if(mark&&chart.contains(mark))showChart(chart,mark)});chart.addEventListener("focusin",function(event){var mark=event.target.closest("[data-chart-point]");if(mark&&chart.contains(mark))showChart(chart,mark)});chart.addEventListener("pointerleave",function(){if(!chart.querySelector("[data-chart-point]:focus"))clearChart(chart)});chart.addEventListener("focusout",function(event){if(!chart.contains(event.relatedTarget))clearChart(chart)})});
+})();`;
 }
 
 function trendTable(data, topData) {
@@ -757,7 +809,7 @@ function buildHtml(raw, categories) {
   html += marketSection('pp', '第二部分', categories.pp, categories.overall, categories.pp, categories.nonpp);
   html += marketSection('nonpp', '第三部分', categories.nonpp, categories.overall, categories.pp, categories.nonpp);
   html += genimoSection(categories.genimo, categories.overall, categories.pp, categories.genimoPP);
-  html += '<footer>报告由 src/build_spec2_html.mjs 从原始工作簿生成。市场总览与数据口径已合并；左侧导航可展开到每个小节，正文小节可用小三角折叠。源表发生更换时，请先确认文件身份、月份覆盖和列名，再重新生成。</footer></main></div></div><script>(function(){var root=document.documentElement,button=document.getElementById("theme-toggle"),saved="dark";try{saved=localStorage.getItem("market-report-theme")||"dark"}catch(e){}root.dataset.theme=saved;button.textContent=saved==="dark"?"☀":"☾";button.addEventListener("click",function(){var next=root.dataset.theme==="dark"?"light":"dark";root.dataset.theme=next;button.textContent=next==="dark"?"☀":"☾";try{localStorage.setItem("market-report-theme",next)}catch(e){}});var links=[].slice.call(document.querySelectorAll(".sidebar nav a"));var groups=[].slice.call(document.querySelectorAll(".nav-group"));var targets=[].slice.call(document.querySelectorAll(".subsection[id],section[id]"));function openTarget(id){var el=document.getElementById(id);if(!el)return;var details=el.closest("details");if(details)details.open=true;var section=el.closest("section");if(section){var group=document.querySelector(\'.nav-group[data-target="\'+section.id+\'"]\');if(group)group.open=true}el.scrollIntoView({behavior:"smooth",block:"start"})}links.forEach(function(a){a.addEventListener("click",function(){openTarget(a.getAttribute("href").slice(1))})});function setActive(el){var id=el.id;links.forEach(function(a){a.classList.toggle("is-active",a.getAttribute("href")==="#"+id)});var section=el.closest("section[id]");var sectionId=section?section.id:(el.matches("section[id]")?el.id:null);groups.forEach(function(group){group.classList.toggle("is-active",!!sectionId&&group.dataset.target===sectionId)})}if("IntersectionObserver" in window){var observer=new IntersectionObserver(function(entries){entries.forEach(function(entry){if(entry.isIntersecting)setActive(entry.target)})},{rootMargin:"-18% 0px -68% 0px"});targets.forEach(function(el){observer.observe(el)})}})();</script></body></html>';
+  html += '<footer>报告由 src/build_spec2_html.mjs 从原始工作簿生成。市场总览与数据口径已合并；左侧导航可展开到每个小节，正文小节可用小三角折叠。图表支持悬停与键盘聚焦查看精确值。源表发生更换时，请先确认文件身份、月份覆盖和列名，再重新生成。</footer></main></div></div><script>' + chartRuntimeScript() + '</script></body></html>';
   return html;
 }
 

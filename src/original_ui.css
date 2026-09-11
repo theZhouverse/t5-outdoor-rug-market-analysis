@@ -36,3 +36,26 @@
 .analysis-list li::marker{color:var(--brand)}
 .analysis-list li b{color:var(--text)}
 @media(max-width:700px){.nav-subitems{margin-left:16px;padding-left:17px}.subsection>.table-wrap,.subsection>.charts,.subsection>.analysis,.subsection>p,.subsection>h4{margin-left:12px}}
+
+/* Interactive chart treatment inspired by Archify's data-attribute states. */
+.chart-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.chart-head h4{margin:0;color:var(--text)}
+.chart-hint{color:var(--faint);font-family:var(--mono);font-size:11px;letter-spacing:.03em;white-space:nowrap}
+.chart-stage{position:relative;margin-top:10px}
+.interactive-chart svg{display:block;width:100%;height:auto;min-width:640px;overflow:visible;touch-action:none}
+.chart-grid-line{stroke:var(--line);stroke-width:1;stroke-dasharray:2 5;opacity:.7}
+.chart-axis-line{stroke:var(--line-strong);stroke-width:1}
+.chart-zero-line{stroke:var(--warning);stroke-width:1;stroke-dasharray:5 4;opacity:.8}
+.chart-mark{cursor:crosshair;outline:none;transition:opacity .16s ease,filter .16s ease}
+.chart-bar{opacity:.8}
+.chart-bar:hover,.chart-bar:focus-visible,.chart-bar.is-active{opacity:1;filter:brightness(1.24) saturate(1.12)}
+.chart-point{pointer-events:none;opacity:.82;transition:r .16s ease,opacity .16s ease}
+.chart-point.is-active{opacity:1;r:5}
+.chart-hit{fill:transparent;stroke:none;cursor:crosshair;outline:none}
+.chart-hit:hover,.chart-hit:focus-visible,.chart-hit.is-active{fill:color-mix(in srgb,var(--text) 8%,transparent)}
+.chart-hit:focus-visible{stroke:var(--text);stroke-width:1;stroke-dasharray:3 3}
+.chart-hoverline{position:absolute;top:28px;bottom:44px;width:1px;background:var(--text);opacity:0;pointer-events:none;transform:translateX(-.5px);transition:opacity .12s ease}
+.chart-hoverline.is-visible{opacity:.35}
+.chart-tooltip{position:absolute;z-index:4;max-width:260px;padding:9px 11px;border:1px solid var(--line-strong);border-radius:5px;color:var(--text);background:color-mix(in srgb,var(--bg) 94%,var(--surface));box-shadow:0 12px 28px rgba(0,0,0,.25);font-family:var(--mono);font-size:12px;line-height:1.55;white-space:pre-line;pointer-events:none}
+.chart-readout{min-height:18px;margin-top:6px;color:var(--faint);font-family:var(--mono);font-size:11px;line-height:1.45}
+@media(max-width:700px){.chart-hint{display:none}.interactive-chart svg{min-width:560px}.chart-tooltip{max-width:220px;font-size:11px}}
