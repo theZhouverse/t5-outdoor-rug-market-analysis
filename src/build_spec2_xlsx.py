@@ -3,10 +3,14 @@ import xlsxwriter
 ROOT=os.path.abspath(os.path.join(os.path.dirname(__file__),'..')); DATA_JSON=os.path.join(ROOT,'tmp','formula_market_builder','spec2_dataset.json'); SOURCE=os.path.join(ROOT,'data','raw','地垫-卖家精灵市场数据.xlsx'); OUT_DIR=os.path.join(ROOT,'outputs','20260911-spec2-market-analysis'); OUT_FILE=os.environ.get('SPEC2_XLSX_OUT',os.path.join(OUT_DIR,'户外地垫市场分析-SPEC2-可回勾版.xlsx')); os.makedirs(os.path.dirname(OUT_FILE),exist_ok=True)
 data=json.load(open(DATA_JSON,encoding='utf-8')); raw=data['raw']; detail=data['dedup']; months=[str(m) for m in data['months']]; data_status={str(x['month']): ('有数据' if x['rowCount'] else '无数据') for x in data.get('sheetStats',[])}; source_hash=hashlib.sha256(open(SOURCE,'rb').read()).hexdigest()
 scopes=[('overall','整体市场'),('pp','PP市场'),('nonpp','高客单价市场'),('genimo','GENIMO品牌')]
+# GENIMO in PP is a brand sub-view.  Keep it out of the four business
+# sections, but include it in the formula source layer so the workbook can
+# expose the same 4.2 metrics as the HTML report.
+calc_scopes=scopes+[('genimoPP','GENIMO PP市场')]
 bands=[('头部 1-20',1,20),('中部 21-50',21,50),('尾部 51-100',51,100),('1-5',1,5),('6-10',6,10),('11-20',11,20),('21-50',21,50),('51-100',51,100)]; levels=['全部','Top100']+[x[0] for x in bands]
 def finite(x): return isinstance(x,(int,float)) and math.isfinite(x)
 def listing_key(r): return str(r.get('parent') or r.get('asin') or ('source:'+str(r.get('month'))+'#'+str(r.get('sourceRow')))).strip()
-def in_scope(r,s): return s=='overall' or (s=='pp' and r.get('plastic')) or (s=='nonpp' and not r.get('plastic')) or (s=='genimo' and r.get('genimo'))
+def in_scope(r,s): return s=='overall' or (s=='pp' and r.get('plastic')) or (s=='nonpp' and not r.get('plastic')) or (s=='genimo' and r.get('genimo')) or (s=='genimoPP' and r.get('genimo') and r.get('plastic'))
 def in_level(r,l):
     if l=='全部': return True
     rank=r.get('rank')
@@ -23,13 +27,17 @@ detail_flags={(str(r.get('month')),str(r.get('familyKey','')).split('|',1)[-1]):
 def raw_in_scope(r,s):
     if s=='overall': return True
     d=detail_flags.get((str(r.get('month')),listing_key(r)),{})
-    return bool(d.get('plastic')) if s=='pp' else (not bool(d.get('plastic'))) if s=='nonpp' else bool(d.get('genimo'))
-candidate_raw={(s,m):sum(1 for r in raw if str(r.get('month'))==m and finite(r.get('rank')) and 1<=r['rank']<=100 and raw_in_scope(r,s)) for s,_ in scopes for m in months}
+    if s=='pp': return bool(d.get('plastic'))
+    if s=='nonpp': return not bool(d.get('plastic'))
+    if s=='genimo': return bool(d.get('genimo'))
+    if s=='genimoPP': return bool(d.get('genimo')) and bool(d.get('plastic'))
+    return True
+candidate_raw={(s,m):sum(1 for r in raw if str(r.get('month'))==m and finite(r.get('rank')) and 1<=r['rank']<=100 and raw_in_scope(r,s)) for s,_ in calc_scopes for m in months}
 def metrics(rows):
     paired=[r for r in rows if finite(r.get('sales')) and finite(r.get('revenue')) and r['sales']>0]
     return {'count':len(rows),'sales':sum(r['sales'] for r in rows if finite(r.get('sales'))),'revenue':sum(r['revenue'] for r in rows if finite(r.get('revenue'))),'price_sum':sum(r['price'] for r in rows if finite(r.get('price'))),'price_count':sum(1 for r in rows if finite(r.get('price'))),'paired_sales':sum(r['sales'] for r in paired),'paired_revenue':sum(r['revenue'] for r in paired),'sales_valid':sum(1 for r in rows if finite(r.get('sales'))),'revenue_valid':sum(1 for r in rows if finite(r.get('revenue')))}
 aggregate={}
-for scope,_ in scopes:
+for scope,_ in calc_scopes:
     for month in months:
         pool=[r for r in detail if str(r['month'])==month and in_scope(r,scope)]
         top_pool=select_top100(pool)
@@ -68,7 +76,7 @@ s.freeze_panes(4,7); s.autofilter(3,0,len(detail)+3,20); s.set_column(0,0,11); s
 # aggregate helper
 s=ws['92_聚合输入']; ah=['月份','范围键','范围','层级','Listing数','销量','销售额($)','价格合计($)','价格有效数','配对销量','配对销售额($)','销量有效数','销售额有效数','数据状态','BSR候选原始行数']; setup(s,'聚合输入（由 91_去重明细确定性生成）',14,'本页由去重明细按月、范围和层级生成；01—06 展示页公式只引用本页。MOM按去年同月，YOY按上一年度；BSR候选原始行数由90页先筛BSR后统计，空子表标记为无数据，不按 0 伪造。'); headers(s,3,ah)
 agg=[]
-for scope,label in scopes:
+for scope,label in calc_scopes:
     for m in months:
         for level in levels:
             z=aggregate[(scope,m,level)]; agg.append([m,scope,label,level,z['count'],z['sales'],z['revenue'],z['price_sum'],z['price_count'],z['paired_sales'],z['paired_revenue'],z['sales_valid'],z['revenue_valid'],data_status.get(m,'无数据'),z.get('candidate_raw_rows')])
@@ -86,29 +94,77 @@ def anf_range(field,scope,level,yref,start_month,end_month):
 def avgf(scope,level,mref): return '=IFERROR(%s/%s,"")'%(af('price_sum',scope,level,mref)[1:],af('price_count',scope,level,mref)[1:])
 def aspf(scope,level,mref): return '=IFERROR(%s/%s,"")'%(af('paired_revenue',scope,level,mref)[1:],af('paired_sales',scope,level,mref)[1:])
 # monthly pages
-mn={'overall':'01_整体市场月度','pp':'02_PP市场月度','nonpp':'03_高客单价市场月度','genimo':'04_GENIMO品牌月度'}; mh=['月份','整体/范围Listing（去重）','整体/范围销量','整体/范围销售额($)','平均标价($)','加权成交均价($)','销量有效数','销售额有效数','价格有效数','销量MOM','销售额MOM','BSR前100去重Listing数','Top100销量','Top100销售额($)','Top100平均标价($)','数据状态','BSR前100原始候选行数']; mrow={m:i+5 for i,m in enumerate(months)}
-for scope,label in scopes:
-    s=ws[mn[scope]]; setup(s,label+'·月度数据（公式）',16,'销量、销售额、平均标价和加权成交均价由 92_聚合输入公式汇总；MOM=去年同月，YOY=上一年度。Top100为BSR 1—100（含100）；同时显示原始候选行数和去重Listing数，便于与90页手工筛选回勾。'); headers(s,3,mh); s.freeze_panes(4,0); s.set_column(0,0,12); s.set_column(1,16,18)
+mn={'overall':'01_整体市场月度','pp':'02_PP市场月度','nonpp':'03_高客单价市场月度'}; mh=['月份','整体/范围Listing（去重）','整体/范围销量','整体/范围销售额($)','平均标价($)','加权成交均价($)','销量有效数','销售额有效数','价格有效数','销量MOM','销售额MOM','BSR前100去重Listing数','Top100销量','Top100销售额($)','Top100平均标价($)','Top100加权成交均价($)','Top100销量MOM','Top100销售额MOM','数据状态','BSR前100原始候选行数']; mrow={m:i+5 for i,m in enumerate(months)}
+for scope,label in scopes[:3]:
+    s=ws[mn[scope]]; setup(s,label+'·月度数据（公式）',19,'销量、销售额、平均标价和加权成交均价由 92_聚合输入公式汇总；MOM=去年同月，YOY=上一年度。Top100为BSR 1—100（含100）；同时显示整体与Top100各自的MOM、原始候选行数和去重Listing数，便于与90页手工筛选回勾。'); headers(s,3,mh); s.freeze_panes(4,0); s.set_column(0,0,12); s.set_column(1,19,18)
     for i,m in enumerate(months,4):
         row=i+1; ref='$A%d'%row; pm,py=prev_month(m),prev_year(m); pmr,pyr=mrow.get(pm),mrow.get(py); cur=aggregate[(scope,m,'全部')]; top=aggregate[(scope,m,'Top100')]
-        vals=[cur['count'],cur['sales'],cur['revenue'],cur['price_sum']/cur['price_count'] if cur['price_count'] else '',cur['paired_revenue']/cur['paired_sales'] if cur['paired_sales'] else '',cur['sales_valid'],cur['revenue_valid'],cur['price_count'],pct(cur['sales'],aggregate.get((scope,py,'全部'),{}).get('sales')) if pyr else '',pct(cur['revenue'],aggregate.get((scope,py,'全部'),{}).get('revenue')) if pyr else '',top['count'],top['sales'],top['revenue'],top['price_sum']/top['price_count'] if top['price_count'] else '',top.get('candidate_raw_rows')]
-        fs=[af('count',scope,'全部',ref),af('sales',scope,'全部',ref),af('revenue',scope,'全部',ref),avgf(scope,'全部',ref),aspf(scope,'全部',ref),af('sales_valid',scope,'全部',ref),af('revenue_valid',scope,'全部',ref),af('price_count',scope,'全部',ref),'=IFERROR(C%d/C%d-1,"")'%(row,pyr) if pyr else '=""','=IFERROR(D%d/D%d-1,"")'%(row,pyr) if pyr else '=""',af('count',scope,'Top100',ref),af('sales',scope,'Top100',ref),af('revenue',scope,'Top100',ref),avgf(scope,'Top100',ref),af('candidate_raw_rows',scope,'Top100',ref)]
-        fm=[fnum,fnum,fnum,fmoney,fmoney,fnum,fnum,fnum,fpct,fpct,fnum,fnum,fnum,fmoney,fnum];
-        if data_status.get(m)=='无数据': vals=['']*15
+        vals=[cur['count'],cur['sales'],cur['revenue'],cur['price_sum']/cur['price_count'] if cur['price_count'] else '',cur['paired_revenue']/cur['paired_sales'] if cur['paired_sales'] else '',cur['sales_valid'],cur['revenue_valid'],cur['price_count'],pct(cur['sales'],aggregate.get((scope,py,'全部'),{}).get('sales')) if pyr else '',pct(cur['revenue'],aggregate.get((scope,py,'全部'),{}).get('revenue')) if pyr else '',top['count'],top['sales'],top['revenue'],top['price_sum']/top['price_count'] if top['price_count'] else '',top['paired_revenue']/top['paired_sales'] if top['paired_sales'] else '',pct(top['sales'],aggregate.get((scope,py,'Top100'),{}).get('sales')) if pyr else '',pct(top['revenue'],aggregate.get((scope,py,'Top100'),{}).get('revenue')) if pyr else '',top.get('candidate_raw_rows')]
+        fs=[af('count',scope,'全部',ref),af('sales',scope,'全部',ref),af('revenue',scope,'全部',ref),avgf(scope,'全部',ref),aspf(scope,'全部',ref),af('sales_valid',scope,'全部',ref),af('revenue_valid',scope,'全部',ref),af('price_count',scope,'全部',ref),'=IFERROR(C%d/C%d-1,"")'%(row,pyr) if pyr else '=""','=IFERROR(D%d/D%d-1,"")'%(row,pyr) if pyr else '=""',af('count',scope,'Top100',ref),af('sales',scope,'Top100',ref),af('revenue',scope,'Top100',ref),avgf(scope,'Top100',ref),aspf(scope,'Top100',ref),'=IFERROR(M%d/M%d-1,"")'%(row,pyr) if pyr else '=""','=IFERROR(N%d/N%d-1,"")'%(row,pyr) if pyr else '=""',af('candidate_raw_rows',scope,'Top100',ref)]
+        fm=[fnum,fnum,fnum,fmoney,fmoney,fnum,fnum,fnum,fpct,fpct,fnum,fnum,fnum,fmoney,fmoney,fpct,fpct,fnum];
+        if data_status.get(m)=='无数据': vals=['']*18
         s.write(i,0,m,text_fmt)
-        for c,(f,v,fmt) in enumerate(zip(fs,vals,fm),1): formula(s,i,c + (1 if c == 15 else 0),f,v,fmt)
-        s.write(i,15,data_status.get(m,'无数据'),text_fmt)
+        for c,(f,v,fmt) in enumerate(zip(fs,vals,fm),1): formula(s,i,c + (1 if c == 18 else 0),f,v,fmt)
+        s.write(i,18,data_status.get(m,'无数据'),text_fmt)
+# GENIMO has two report-facing tables.  Keep the first table in the same
+# field order as HTML 4.1 (including the two overall-market shares), then
+# place the PP sub-view in a second table below it so every report column has
+# a formula-backed workbook counterpart.
+s=ws['04_GENIMO品牌月度']; setup(s,'GENIMO品牌·整体市场与PP市场（公式）',10,'GENIMO是品牌视角，不从整体、PP、高客单价三部分中另行加总。4.1份额分母为整体市场；4.2份额分母为PP市场；MOM均比较去年同月。'); headers(s,3,['月份','GENIMO Listing数','销量','销售额($)','平均标价($)','销量占整体','销售额占整体','销量MOM','销售额MOM','Top100 Listing数','数据状态']); s.freeze_panes(4,0); s.set_column(0,0,12); s.set_column(1,10,18)
+genimo_row={m:i+5 for i,m in enumerate(months)}
+for i,m in enumerate(months,4):
+    row=i+1; ref='$A%d'%row; py=prev_year(m); pyr=genimo_row.get(py); cur=aggregate[('genimo',m,'全部')]
+    overall_cur=aggregate[('overall',m,'全部')]
+    vals=[cur['count'],cur['sales'],cur['revenue'],cur['price_sum']/cur['price_count'] if cur['price_count'] else '',cur['sales']/overall_cur['sales'] if finite(overall_cur.get('sales')) and overall_cur['sales'] else '',cur['revenue']/overall_cur['revenue'] if finite(overall_cur.get('revenue')) and overall_cur['revenue'] else '',pct(cur['sales'],aggregate.get(('genimo',py,'全部'),{}).get('sales')) if pyr else '',pct(cur['revenue'],aggregate.get(('genimo',py,'全部'),{}).get('revenue')) if pyr else '',aggregate[('genimo',m,'Top100')]['count']]
+    fs=[af('count','genimo','全部',ref),af('sales','genimo','全部',ref),af('revenue','genimo','全部',ref),avgf('genimo','全部',ref),"=IFERROR(C%d/'01_整体市场月度'!C%d,\"\")"%(row,mrow[m]),"=IFERROR(D%d/'01_整体市场月度'!D%d,\"\")"%(row,mrow[m]),'=IFERROR(C%d/C%d-1,"")'%(row,pyr) if pyr else '=""','=IFERROR(D%d/D%d-1,"")'%(row,pyr) if pyr else '=""',af('count','genimo','Top100',ref)]
+    fm=[fnum,fnum,fmoney,fmoney,fpct,fpct,fpct,fpct,fnum]
+    if data_status.get(m)=='无数据': vals=['']*9
+    s.write(i,0,m,text_fmt)
+    for c,(f,v,fmt) in enumerate(zip(fs,vals,fm),1): formula(s,i,c,f,v,fmt)
+    s.write(i,10,data_status.get(m,'无数据'),text_fmt)
+pp_title=4+len(months)+2; pp_note=pp_title+1; pp_header=pp_title+2; pp_data=pp_header+1
+s.merge_range(pp_title,0,pp_title,9,'4.2 GENIMO 在 PP 市场中的表现',title_fmt); s.set_row(pp_title,24)
+s.merge_range(pp_note,0,pp_note,9,'PP市场份额分母为PP整体盘；GENIMO PP按父ASIN优先/ASIN去重，组内任一子体标题命中 plastic 即归入PP。',note_fmt); s.set_row(pp_note,36)
+headers(s,pp_header,['月份','GENIMO PP Listing数','PP内销量','PP内销售额($)','平均标价($)','销量占PP','销售额占PP','销量MOM','销售额MOM'])
+pp_row={m:pp_data+i for i,m in enumerate(months)}
+for i,m in enumerate(months):
+    x=pp_data+i; row=x+1; ref='$A%d'%row; py=prev_year(m); pyr=pp_row.get(py); cur=aggregate[('genimoPP',m,'全部')]
+    pp_cur=aggregate[('pp',m,'全部')]
+    vals=[cur['count'],cur['sales'],cur['revenue'],cur['price_sum']/cur['price_count'] if cur['price_count'] else '',cur['sales']/pp_cur['sales'] if finite(pp_cur.get('sales')) and pp_cur['sales'] else '',cur['revenue']/pp_cur['revenue'] if finite(pp_cur.get('revenue')) and pp_cur['revenue'] else '',pct(cur['sales'],aggregate.get(('genimoPP',py,'全部'),{}).get('sales')) if pyr else '',pct(cur['revenue'],aggregate.get(('genimoPP',py,'全部'),{}).get('revenue')) if pyr else '']
+    fs=[af('count','genimoPP','全部',ref),af('sales','genimoPP','全部',ref),af('revenue','genimoPP','全部',ref),avgf('genimoPP','全部',ref),"=IFERROR(C%d/'02_PP市场月度'!C%d,\"\")"%(row,mrow[m]),"=IFERROR(D%d/'02_PP市场月度'!D%d,\"\")"%(row,mrow[m]),'=IFERROR(C%d/C%d-1,"")'%(row,pyr) if pyr else '=""','=IFERROR(D%d/D%d-1,"")'%(row,pyr) if pyr else '=""']
+    fm=[fnum,fnum,fmoney,fmoney,fpct,fpct,fpct,fpct,fpct]
+    if data_status.get(m)=='无数据': vals=['']*8
+    s.write(x,0,m,text_fmt)
+    for c,(f,v,fmt) in enumerate(zip(fs,vals,fm),1): formula(s,x,c,f,v,fmt)
+    s.write(x,9,data_status.get(m,'无数据'),text_fmt)
+s.freeze_panes(4,0); s.autofilter(3,0,len(months)+4,10); s.set_column(0,0,12); s.set_column(1,10,18)
 # annual page: all four business scopes share the same annual YOY table.
 s=ws['05_年度YOY']; setup(s,'年度YOY与覆盖状态（公式）',15,'年度统计由 92_聚合输入按年份和范围汇总；平均标价按有效价格记录算术平均；YOY按当前年与上一年度的共同覆盖月份计算，未完结年份标记实际覆盖月份。'); headers(s,3,['年份','范围','Listing数','销量','销售额($)','平均标价($)','加权成交均价($)','销量YOY','销售额YOY','Top100 Listing','Top100销量','Top100销售额($)','Top100平均标价($)','Top100销量YOY','Top100销售额YOY','数据状态']); years=sorted({m[:4] for m in months}); year_months_map={y:sorted([m for m in months if m.startswith(y) and data_status.get(m)=='有数据']) for y in years}; s.set_column(0,0,11); s.set_column(1,15,17)
-annual_row={(scope,y): 5 + si*len(years) + yi for si,(scope,_) in enumerate(scopes) for yi,y in enumerate(years)}
+annual_scopes=scopes+[('genimoPP','GENIMO PP市场')]
+annual_row={(scope,y): 5 + si*len(years) + yi for si,(scope,_) in enumerate(annual_scopes) for yi,y in enumerate(years)}
 annual_cache={}
-for si,(scope,label) in enumerate(scopes):
+for si,(scope,label) in enumerate(annual_scopes):
     for yi,y in enumerate(years):
         i=4 + si*len(years) + yi; row=i+1; ref='$A%d'%row; s.write(i,0,y,text_fmt); s.write(i,1,label,text_fmt)
-        pool=[r for r in detail if str(r['month']).startswith(y) and in_scope(r,scope)]; tp=select_top100(pool); cm,tm=metrics(pool),metrics(tp); prev=f'{int(y)-1:04d}' if (scope,f'{int(y)-1:04d}') in annual_row else None
+        pool=[r for r in detail if str(r['month']).startswith(y) and in_scope(r,scope)]
+        # Top100 is selected independently for each month.  Annual Top100
+        # values therefore sum the monthly Top100 pools; selecting one top
+        # 100 across the whole year would undercount both the report and the
+        # SUMIFS formulas in this workbook.
+        annual_top_rows=[]
+        for ym in year_months_map.get(y,[]):
+            month_pool=[r for r in detail if str(r['month'])==ym and in_scope(r,scope)]
+            annual_top_rows.extend(select_top100(month_pool))
+        cm,tm=metrics(pool),metrics(annual_top_rows); prev=f'{int(y)-1:04d}' if (scope,f'{int(y)-1:04d}') in annual_row else None
         common_suffixes=sorted({m[4:] for m in year_months_map.get(y,[])} & {m[4:] for m in year_months_map.get(prev,[])}) if prev else []
-        cmp_pool=[r for r in pool if str(r['month'])[4:] in common_suffixes]; cmp_top=[r for r in tp if str(r['month'])[4:] in common_suffixes]; ccur, ctop=metrics(cmp_pool),metrics(cmp_top)
-        prev_pool=[r for r in detail if prev and str(r['month']).startswith(prev) and str(r['month'])[4:] in common_suffixes and in_scope(r,scope)]; prev_top=select_top100(prev_pool); pcur, ptop=metrics(prev_pool),metrics(prev_top)
+        cmp_pool=[r for r in pool if str(r['month'])[4:] in common_suffixes]; cmp_top=[r for r in annual_top_rows if str(r['month'])[4:] in common_suffixes]; ccur, ctop=metrics(cmp_pool),metrics(cmp_top)
+        prev_pool=[r for r in detail if prev and str(r['month']).startswith(prev) and str(r['month'])[4:] in common_suffixes and in_scope(r,scope)]
+        prev_top=[]
+        for pm in year_months_map.get(prev,[]):
+            if pm[4:] in common_suffixes:
+                month_pool=[r for r in detail if str(r['month'])==pm and in_scope(r,scope)]
+                prev_top.extend(select_top100(month_pool))
+        pcur, ptop=metrics(prev_pool),metrics(prev_top)
         vals=[cm['count'],cm['sales'],cm['revenue'],cm['price_sum']/cm['price_count'] if cm['price_count'] else '',cm['paired_revenue']/cm['paired_sales'] if cm['paired_sales'] else '',pct(ccur['sales'],pcur['sales']) if prev else '',pct(ccur['revenue'],pcur['revenue']) if prev else '',tm['count'],tm['sales'],tm['revenue'],tm['price_sum']/tm['price_count'] if tm['price_count'] else '',pct(ctop['sales'],ptop['sales']) if prev else '',pct(ctop['revenue'],ptop['revenue']) if prev else '']
         annual_cache[(scope,y)]={'sales':cm['sales'],'revenue':cm['revenue'],'top_sales':tm['sales'],'top_revenue':tm['revenue']}
         prev_row=annual_row[(scope,prev)] if prev else None
@@ -137,7 +193,7 @@ s.freeze_panes(4,0);s.autofilter(3,0,len(tv)+3,10);s.set_column(0,0,11);s.set_co
 s=ws['93_数据校验']; setup(s,'数据校验（独立检查，不驱动业务结果）',5,'检查页只观察数据，不向汇总表提供业务值。失败时按 90 原始输入 → 91 去重明细 → 92 聚合输入 → 展示页公式定位。'); headers(s,2,['校验项','结果','期望','差额','状态','说明']); s.set_column(0,0,30); s.set_column(1,5,18); items=['原始有效行数','去重明细行数','BSR=100存在','整体=PP+高客单价市场（最新月销量）','整体=PP+高客单价市场（最新月销售额）']; raw_end=len(raw)+4; det_end=len(detail)+4; lr=len(months)+4; cf=["=COUNTA('90_原始输入'!A5:A%d)"%raw_end,"=COUNTA('91_去重明细'!A5:A%d)"%det_end,"=IF(COUNTIF('91_去重明细'!J5:J%d,100)>0,\"通过\",\"失败\")"%det_end,"='01_整体市场月度'!C%d-'02_PP市场月度'!C%d-'03_高客单价市场月度'!C%d"%(lr,lr,lr),"='01_整体市场月度'!D%d-'02_PP市场月度'!D%d-'03_高客单价市场月度'!D%d"%(lr,lr,lr)]; ex=[len(raw),len(detail),'通过',0,0]
 for i,(f,v,e) in enumerate(zip(cf,[len(raw),len(detail),'通过',0,0],ex),3):
     s.write(i,0,items[i-3],text_fmt); formula(s,i,1,f,v,num_fmt if isinstance(v,(int,float)) else text_fmt); s.write(i,2,e,num_fmt if isinstance(e,(int,float)) else text_fmt); formula(s,i,3,'=B%d-C%d'%(i+1,i+1),0,num_fmt); formula(s,i,4,'=IF(D%d=0,"通过","失败")'%(i+1),'通过',text_fmt); s.write(i,5,['原始主源行数回勾','去重后 Listing 数回勾','Top100 边界包含100','最新月份销量分区互补','最新月份销售额分区互补'][i-3],text_fmt)
-s.write(8,0,'最新月份数据状态',text_fmt); formula(s,8,1,"='01_整体市场月度'!P%d"%lr,'有数据',text_fmt); s.write(8,2,'应有源数据',text_fmt); s.write(8,3,'无数据月份不伪造为0',text_fmt); s.write(8,4,'已识别',text_fmt); s.write(8,5,'2025.10—2026.07 子表均有数据；表头行由读取程序自动识别',text_fmt)
+s.write(8,0,'最新月份数据状态',text_fmt); formula(s,8,1,"='01_整体市场月度'!S%d"%lr,'有数据',text_fmt); s.write(8,2,'应有源数据',text_fmt); s.write(8,3,'无数据月份不伪造为0',text_fmt); s.write(8,4,'已识别',text_fmt); s.write(8,5,'2025.10—2026.07 子表均有数据；表头行由读取程序自动识别',text_fmt)
 # overview
 s=ws['00_总览与校验']; setup(s,'户外地垫市场分析｜SPEC 2.0 可回勾工作簿',7,'本工作簿与 HTML 使用同一原始主源、同一 BSR/去重/PP 分类逻辑。整体市场=PP+高客单价市场；GENIMO是品牌视角；本工作簿不计算利润。'); headers(s,3,['项目','值','公式/来源','核对位置','状态','说明','原始主源SHA-256','生成批次']); s.set_column(0,0,18);s.set_column(1,1,18);s.set_column(2,5,28);s.set_column(6,6,68);s.set_column(7,7,16)
 oi=[('原始有效行',"='93_数据校验'!B4",'93_数据校验','原始输入行数',len(raw)),('去重Listing',"='93_数据校验'!B5",'93_数据校验','父ASIN优先去重',len(detail)),('Top100去重Listing',"='01_整体市场月度'!L%d"%lr,'01_整体市场月度','BSR 1—100含100',aggregate[('overall',months[-1],'Top100')]['count']),('PP去重Listing',"='02_PP市场月度'!B%d"%lr,'02_PP市场月度','PP=1',aggregate[('pp',months[-1],'全部')]['count']),('高客单价去重Listing',"='03_高客单价市场月度'!B%d"%lr,'03_高客单价市场月度','PP=0',aggregate[('nonpp',months[-1],'全部')]['count']),('GENIMO去重Listing',"='04_GENIMO品牌月度'!B%d"%lr,'04_GENIMO品牌月度','品牌视角',aggregate[('genimo',months[-1],'全部')]['count'])]

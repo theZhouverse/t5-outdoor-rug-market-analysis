@@ -590,7 +590,7 @@ function topTrendTable(data, candidateData) {
   return table(['月份', 'Top100去重Listing数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', '原始候选行数'], rows);
 }
 
-function annualTable(data, topData) {
+function annualTable(data, topData, prefix = '整体') {
   const rows = data.map((r, i) => {
     const top = topData[i] || {};
     return [
@@ -608,7 +608,7 @@ function annualTable(data, topData) {
       fmtPct(top.yoyRevenue)
     ];
   });
-  return table(['年份', '整体商品数', '整体销量', '整体销售额($)', '整体平均标价($)', '整体销量YOY', '整体销售额YOY', 'Top100商品数', 'Top100销量', 'Top100销售额($)', 'Top100销量YOY', 'Top100销售额YOY'], rows);
+  return table(['年份', prefix + '商品数', prefix + '销量', prefix + '销售额($)', prefix + '平均标价($)', prefix + '销量YOY', prefix + '销售额YOY', 'Top100商品数', 'Top100销量', 'Top100销售额($)', 'Top100销量YOY', 'Top100销售额YOY'], rows);
 }
 
 function tierTable(data, title) {
@@ -690,8 +690,8 @@ function genimoSection(category, overall, pp, genimoPP) {
       fmt(r.sales),
       fmt(r.revenue, 2),
       fmt(r.avgPrice, 2),
-      fmtPct(percent(r.sales, base.sales)),
-      fmtPct(percent(r.revenue, base.revenue)),
+      fmtPct(Number.isFinite(r.sales) && Number.isFinite(base.sales) && base.sales !== 0 ? r.sales / base.sales : null),
+      fmtPct(Number.isFinite(r.revenue) && Number.isFinite(base.revenue) && base.revenue !== 0 ? r.revenue / base.revenue : null),
       fmtPct(r.momSales),
       fmtPct(r.momRevenue),
       fmt(top.count)
@@ -708,14 +708,15 @@ function genimoSection(category, overall, pp, genimoPP) {
       fmt(r.sales),
       fmt(r.revenue, 2),
       fmt(r.avgPrice, 2),
-      fmtPct(percent(r.sales, base.sales)),
-      fmtPct(percent(r.revenue, base.revenue)),
+      fmtPct(Number.isFinite(r.sales) && Number.isFinite(base.sales) && base.sales !== 0 ? r.sales / base.sales : null),
+      fmtPct(Number.isFinite(r.revenue) && Number.isFinite(base.revenue) && base.revenue !== 0 ? r.revenue / base.revenue : null),
       fmtPct(r.momSales),
       fmtPct(r.momRevenue)
     ];
   });
   let ppBody = '<p>PP市场份额分母为PP整体盘；GENIMO在PP中的统计仍沿用父ASIN优先/ASIN去重和Top100先筛选规则。</p>';
   ppBody += table(['月份', 'GENIMO PP Listing数', 'PP内销量', 'PP内销售额($)', '平均标价($)', '销量占PP', '销售额占PP', '销量MOM', '销售额MOM'], ppRows);
+  ppBody += '<h4>GENIMO PP年度YOY</h4>' + annualTable(genimoPP.annual, genimoPP.topAnnual, 'GENIMO PP');
   ppBody += '<div class="charts">' + svgBarChart('GENIMO PP 月销量', genimoPP.monthly, 'sales', '#be185d', 0) + svgBarChart('GENIMO PP 月销售额', genimoPP.monthly, 'revenue', '#9d174d', 2) + '</div>';
   out += subsection('genimo-4-2', '4.2 GENIMO 在 PP 市场中的表现', ppBody);
   let genimoCharts = '<div class="charts">' + svgBarChart('GENIMO 月销量', category.monthly, 'sales', '#9333ea', 0);
