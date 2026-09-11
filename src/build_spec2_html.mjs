@@ -110,6 +110,25 @@ function listingKey(row) {
   return row.parent || row.asin || 'source:' + sourceId(row);
 }
 
+// SellerSprite exports are not completely uniform: older monthly sheets have
+// a report title in row 1 and the actual header in row 2, while newer sheets
+// start with the header in row 1. Detect the header by its stable ASIN field
+// instead of assuming a fixed row number.
+function findHeaderRow(ws, range) {
+  const lastProbe = Math.min(range.e.r, range.s.r + 8);
+  for (let r = range.s.r; r <= lastProbe; r += 1) {
+    const headers = [];
+    for (let c = range.s.c; c <= range.e.c; c += 1) {
+      headers.push(display(ws[XLSX.utils.encode_cell({ r, c })]));
+    }
+    const asin = findColumn(headers, ['ASIN']);
+    const title = findColumn(headers, ['商品标题', '标题']);
+    const brand = findColumn(headers, ['品牌']);
+    if (asin >= 0 && (title >= 0 || brand >= 0)) return r;
+  }
+  return range.s.r + 1;
+}
+
 function readRawRows() {
   if (!fs.existsSync(SOURCE)) throw new Error('找不到原始主源: ' + SOURCE);
   const wb = XLSX.readFile(SOURCE, {
@@ -129,9 +148,10 @@ function readRawRows() {
     MONTHS.push(month);
     const ws = wb.Sheets[sheet.original];
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    const headerRow = findHeaderRow(ws, range);
     const headers = [];
     for (let c = range.s.c; c <= range.e.c; c += 1) {
-      headers.push(display(ws[XLSX.utils.encode_cell({ r: 1, c })]));
+      headers.push(display(ws[XLSX.utils.encode_cell({ r: headerRow, c })]));
     }
     const idx = {
       asin: findColumn(headers, ['ASIN']),
@@ -149,7 +169,7 @@ function readRawRows() {
     };
     let rowCount = 0;
     let rankCount = 0;
-    for (let r = 2; r <= range.e.r; r += 1) {
+    for (let r = headerRow + 1; r <= range.e.r; r += 1) {
       const values = [];
       let hasValue = false;
       for (let c = range.s.c; c <= range.e.c; c += 1) {
@@ -179,7 +199,7 @@ function readRawRows() {
       rowCount += 1;
       if (row.rank !== null) rankCount += 1;
     }
-    sheetStats.push({ month, rowCount, rankCount });
+    sheetStats.push({ month, rowCount, rankCount, headerRow: headerRow + 1 });
   }
   return { rows: allRows, sheetStats };
 }
@@ -720,6 +740,9 @@ function runHtmlBuild() {
     output: OUTPUT,
     months: MONTHS.length,
     rawRows: dataset.raw.rows.length,
+    sourceMonthsWithData: dataset.raw.sheetStats.filter((item) => item.rowCount > 0).length,
+    sourceMonthsEmpty: dataset.raw.sheetStats.filter((item) => item.rowCount === 0).map((item) => item.month),
+    detectedHeaderRows: Array.from(new Set(dataset.raw.sheetStats.map((item) => item.headerRow))).sort((a, b) => a - b),
     sourceSha256: SOURCE_HASH,
     fullDedup: dataset.fullDedup.length,
     top100Dedup: dataset.topDedup.length,
