@@ -695,7 +695,7 @@ function buildHtml(raw, categories) {
     const links = items.map(([href, text]) => '<a href="#' + esc(href) + '">' + esc(text) + '</a>').join('');
     return '<details class="nav-group" data-target="' + esc(target) + '" open><summary><span class="nav-icon">' + esc(icon) + '</span><span>' + esc(label) + '</span><span class="nav-chevron" aria-hidden="true">⌄</span></summary><div class="nav-subitems">' + links + '</div></details>';
   };
-  const nav = navGroup('dashboard', '总', '市场总览｜数据口径', [
+  const nav = navGroup('dashboard', '总', '数据总览', [
     ['dashboard-0-1', '0.1 范围与关键指标'],
     ['dashboard-0-2', '0.2 数据口径与来源'],
     ['dashboard-0-3', '0.3 原始字段覆盖']
