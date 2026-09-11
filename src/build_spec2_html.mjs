@@ -741,7 +741,16 @@ function buildHtml(raw, categories) {
   html += '<div class="workspace"><header class="topbar"><div><span class="eyebrow">MARKET OVERVIEW · SPEC 2.0</span><h1>户外地垫市场分析</h1><p>整体市场、PP市场、高客单价市场与 GENIMO 品牌 · 销量、销售额、均价 · BSR Top100 · MOM / YOY</p></div><div class="top-actions"><span class="privacy-chip"><i></i> 源数据只读</span><button class="theme-button" id="theme-toggle" aria-label="切换主题">☀</button></div></header><main class="content">';
   html += '<section id="dashboard" class="overview-section"><div class="section-kicker">报告导航 · 0</div><h2>市场总览｜范围与数据口径</h2><p class="lead">先确认数据范围、市场划分和统计单元，再进入四个分析部分。下面每个小节都可以点击左侧导航展开，也可以点击标题前的小三角收起。</p>';
   html += subsection('dashboard-0-1', '0.1 分析范围与关键指标', '<div class="scope-notice"><span>◎</span><div><b>分析范围：</b>原始工作簿覆盖 ' + MONTHS.length + ' 个月；整体市场由 PP 与高客单价市场构成，GENIMO 作为品牌视角单独分析。BSR Top100 使用 1—100（包含100）的独立池。</div></div><div class="metrics-grid"><article class="metric-card"><span class="metric-label">原始有效行</span><strong class="metric-value">' + fmt(rawCount) + '</strong><span class="metric-note">逐月明细读取</span></article><article class="metric-card"><span class="metric-label">整体盘去重 Listing</span><strong class="metric-value">' + fmt(categories.overall.fullRows.length) + '</strong><span class="metric-note">父ASIN优先 / ASIN兜底</span></article><article class="metric-card"><span class="metric-label">BSR Top100 去重</span><strong class="metric-value">' + fmt(categories.overall.topRows.length) + '</strong><span class="metric-note">小类BSR 1—100 含100</span></article><article class="metric-card"><span class="metric-label">GENIMO Listing</span><strong class="metric-value">' + fmt(categories.genimo.fullRows.length) + '</strong><span class="metric-note">品牌整体视角</span></article></div>');
-  html += subsection('dashboard-0-2', '0.2 数据口径与来源', '<div class="scope-notice"><span>◎</span><div><b>口径与来源：</b>整体市场 = PP市场 ∪ 高客单价市场；PP 使用商品标题完整单词 plastic 匹配，高客单价市场为补集。月度 MOM 比较去年同月，年度 YOY 比较上一年度（未完结年度按实际覆盖范围标记）。数据源：' + esc(SOURCE) + '；SHA-256：' + esc(SOURCE_HASH) + '；可解析小类BSR ' + fmt(ranked) + ' 行，Top100候选 ' + fmt(topCandidates) + ' 行；月度子表有数据 ' + fmt(sourceMonthsWithData) + '/' + fmt(raw.sheetStats.length) + '，识别表头行 ' + esc(detectedHeaderRows.join('、')) + '。缺失值不当作零。</div></div><div class="meta"><b>统计单元与代表行</b><br>独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）；代表行按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。原始字段覆盖表仅做只读回勾，不参与任何利润推导。</div>');
+  const scopeBullets = [
+    '整体市场 = PP市场 ∪ 高客单价市场，两者互补且共同构成整体市场。',
+    'PP市场使用商品标题中的完整单词 plastic 匹配；高客单价市场为未匹配 plastic 的补集。',
+    '月度 MOM 比较本月与去年同月；年度 YOY 比较本年与上一年度，未完结年度按实际覆盖范围标记。',
+    '数据源：' + esc(SOURCE) + '；SHA-256：' + esc(SOURCE_HASH) + '。',
+    '可解析小类BSR ' + fmt(ranked) + ' 行，BSR 1—100（包含100）的候选 ' + fmt(topCandidates) + ' 行；月度子表有数据 ' + fmt(sourceMonthsWithData) + '/' + fmt(raw.sheetStats.length) + '，识别表头行 ' + esc(detectedHeaderRows.join('、')) + '。',
+    '缺失值保留为空，不当作零；原始字段只用于市场统计、筛选和回勾。'
+  ].map((item) => '<li>' + item + '</li>').join('');
+  const scopeBody = '<div class="scope-notice"><span>◎</span><div><b>口径与来源：</b><ul class="analysis-list compact-list">' + scopeBullets + '</ul></div></div><div class="meta"><b>统计单元与代表行</b><br>独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）；代表行按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。原始字段覆盖表仅做只读回勾，不参与任何利润推导。</div>';
+  html += subsection('dashboard-0-2', '0.2 数据口径与来源', scopeBody);
   html += subsection('dashboard-0-3', '0.3 原始字段覆盖（只读）', rawFieldCoverage(raw.rows));
   html += '</section>';
   html += marketSection('overall', '第一部分', categories.overall, categories.overall, categories.pp, categories.nonpp);
