@@ -13,7 +13,7 @@
     "audit:competitor": "node tests/competitor_audit.js",
     "audit:plan-reference": "node tests/plan_reference_audit.js",
     "test:overwrite": "node tests/overwrite_guard.js",
-    "test:analysis": "node src/analyze_market.js && node tests/analysis_audit.js",
+    "test:analysis": "node src/analyze_market.js && node tests/analysis_audit.js && node src/build_spec2_html.mjs && node tests/spec2_audit.mjs",
     "test": "npm run verify && npm run audit && npm run audit:competitor && npm run audit:plan-reference && npm run test:analysis && npm run test:frontend && npm run test:overwrite",
     "analyze": "node src/analyze_market.js",
     "analyze:spec2": "node src/build_spec2_html.mjs",

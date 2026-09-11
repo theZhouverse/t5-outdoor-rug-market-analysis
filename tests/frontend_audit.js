@@ -12,6 +12,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const childProcess = require('child_process');
 const ROOT = path.resolve(__dirname, '..');
 const JSON_PATH = path.resolve(ROOT, '交付/户外地垫市场分析数据.json');
 const HTML_PATH = path.resolve(ROOT, '交付/户外地垫市场分析报告-优化版.html');
@@ -19,6 +20,16 @@ const SRC_PATH = path.resolve(ROOT, 'src/analyze_market.js');
 const data = JSON.parse(fs.readFileSync(JSON_PATH, 'utf8'));
 const html = fs.readFileSync(HTML_PATH, 'utf8');
 const src = fs.readFileSync(SRC_PATH, 'utf8');
+
+// The current deliverable is the SPEC 2.0 report generated directly from the
+// raw workbook. Its table topology and source JSON intentionally differ from
+// the retired 43-table report audited below. Keep the legacy audit available
+// for historical pages, but route the current page to its independent audit so
+// `npm run test:frontend` remains a meaningful gate instead of a false failure.
+if (html.includes('MARKET OVERVIEW · SPEC 2.0') && html.includes('BSR前100原始候选行数')) {
+  const result = childProcess.spawnSync(process.execPath, [path.resolve(__dirname, 'spec2_audit.mjs')], { stdio: 'inherit' });
+  process.exit(result.status === null ? 1 : result.status);
+}
 
 let checks = 0, failures = 0;
 function check(label, ok, detail) {
