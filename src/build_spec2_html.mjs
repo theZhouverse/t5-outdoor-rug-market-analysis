@@ -801,7 +801,12 @@ function buildHtml(raw, categories) {
     '可解析小类BSR ' + fmt(ranked) + ' 行，BSR 1—100（包含100）的候选 ' + fmt(topCandidates) + ' 行；月度子表有数据 ' + fmt(sourceMonthsWithData) + '/' + fmt(raw.sheetStats.length) + '，识别表头行 ' + esc(detectedHeaderRows.join('、')) + '。',
     '缺失值保留为空，不当作零；原始字段只用于市场统计、筛选和回勾。'
   ].map((item) => '<li>' + item + '</li>').join('');
-  const scopeBody = '<div class="scope-notice"><span>◎</span><div><b>口径与来源：</b><ul class="analysis-list compact-list">' + scopeBullets + '</ul></div></div><div class="meta"><b>统计单元与代表行</b><br>独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）；代表行按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。原始字段覆盖表仅做只读回勾，不参与任何利润推导。</div>';
+  const statUnitBullets = [
+    '统计单元：独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）。',
+    '代表行：按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。',
+    '原始字段覆盖表：仅做只读回勾，不参与任何利润推导。'
+  ].map((item) => '<li>' + item + '</li>').join('');
+  const scopeBody = '<div class="scope-notice"><span>◎</span><div><b>口径与来源：</b><ul class="analysis-list compact-list">' + scopeBullets + '</ul></div></div><div class="meta"><b>统计单元与代表行</b><ul class="analysis-list compact-list">' + statUnitBullets + '</ul></div>';
   html += subsection('dashboard-0-2', '0.2 数据口径与来源', scopeBody);
   html += subsection('dashboard-0-3', '0.3 原始字段覆盖（只读）', rawFieldCoverage(raw.rows));
   html += '</section>';
