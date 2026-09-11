@@ -481,6 +481,14 @@ function table(headers, rows) {
   return out + '</tbody></table></div>';
 }
 
+// A report subsection is a native <details> element so readers can collapse
+// long tables/charts without losing the section's stable anchor. The summary
+// remains the visible navigation label and the body contains the existing
+// generated artifact.
+function subsection(id, label, body, open = true) {
+  return '<details id="' + esc(id) + '" class="subsection"' + (open ? ' open' : '') + '><summary>' + esc(label) + '</summary>' + body + '</details>';
+}
+
 function trendTable(data, topData) {
   const rows = data.map((r, i) => [
     r.month.slice(0, 4) + '.' + Number(r.month.slice(4, 6)),
@@ -579,24 +587,24 @@ function marketSection(id, number, category, overall, pp, nonpp) {
   out += '<div class="card"><b>最新月整体销售额</b><strong>$' + fmt(latest.revenue, 2) + '</strong><small>原始月销售额合计</small></div>';
   out += '<div class="card"><b>最新月 Top100 销量</b><strong>' + fmt(topLatest.sales) + '</strong><small>' + fmt(topLatest.count) + ' 个 Listing</small></div>';
   out += '<div class="card"><b>最新月平均标价</b><strong>$' + fmt(latest.avgPrice, 2) + '</strong><small>按有价格记录算术平均</small></div></div>';
-  out += '<h3>' + sectionNo + '.1 月度汇总与可回勾数据</h3>' + trendTable(category.monthly, category.topMonthly);
-  out += '<h3>' + sectionNo + '.2 BSR Top100 月度明细</h3>' + topTrendTable(category.topMonthly);
-  out += '<h3>' + sectionNo + '.3 年度 YOY 汇总</h3>' + annualTable(category.annual, category.topAnnual);
-  out += '<h3>' + sectionNo + '.4 市场趋势图</h3><div class="charts">' + svgBarChart(category.title + '月销量', category.monthly, 'sales', '#2563eb', 0);
-  out += svgBarChart(category.title + '月销售额', category.monthly, 'revenue', '#0f766e', 2);
-  out += svgLineChart(category.title + '平均标价趋势', category.monthly, [{ name: '平均标价($)', field: 'avgPrice', color: '#7c3aed' }]);
-  out += svgLineChart(category.title + '销量MOM（去年同月）', category.monthly, [{ name: '销量MOM', field: 'momSales', color: '#2563eb' }], true);
-  out += '</div><h3>' + sectionNo + '.5 BSR Top100 五档与头中尾 MOM</h3>';
-  out += '<p>Top100 先按可解析的小类BSR筛选 1—100（含100），再按父ASIN优先、否则ASIN去重；五档互斥为 1-5、6-10、11-20、21-50、51-100。MOM统一比较去年同月。</p>';
-  out += '<div class="charts">';
-  out += svgLineChart(category.title + ' Top100 五档销量MOM', fineCombined, FINE_BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#1d4ed8', '#0891b2', '#059669', '#f59e0b', '#dc2626'][i] })), true);
-  out += svgLineChart(category.title + ' Top100 头/中/尾销量MOM', tierCombined, BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#2563eb', '#059669', '#f97316'][i] })), true);
-  out += '</div>';
-  out += '<h3>' + sectionNo + '.6 头部 / 中部 / 尾部明细</h3>';
-  for (const band of BANDS) out += tierTable(category.tiers[band.key], band.name);
-  out += '<h3>' + sectionNo + '.7 数据驱动文字分析</h3><div class="analysis">';
-  for (const paragraph of narrative(category, overall, pp, nonpp)) out += '<p>' + esc(paragraph) + '</p>';
-  out += '</div></section>';
+  out += subsection(id + '-1-1', sectionNo + '.1 月度汇总与可回勾数据', trendTable(category.monthly, category.topMonthly));
+  out += subsection(id + '-1-2', sectionNo + '.2 BSR Top100 月度明细', topTrendTable(category.topMonthly));
+  out += subsection(id + '-1-3', sectionNo + '.3 年度 YOY 汇总', annualTable(category.annual, category.topAnnual));
+  let charts = '<div class="charts">' + svgBarChart(category.title + '月销量', category.monthly, 'sales', '#2563eb', 0);
+  charts += svgBarChart(category.title + '月销售额', category.monthly, 'revenue', '#0f766e', 2);
+  charts += svgLineChart(category.title + '平均标价趋势', category.monthly, [{ name: '平均标价($)', field: 'avgPrice', color: '#7c3aed' }]);
+  charts += svgLineChart(category.title + '销量MOM（去年同月）', category.monthly, [{ name: '销量MOM', field: 'momSales', color: '#2563eb' }], true) + '</div>';
+  out += subsection(id + '-1-4', sectionNo + '.4 市场趋势图', charts);
+  let rankCharts = '<p>Top100 先按可解析的小类BSR筛选 1—100（含100），再按父ASIN优先、否则ASIN去重；五档互斥为 1-5、6-10、11-20、21-50、51-100。MOM统一比较去年同月。</p><div class="charts">';
+  rankCharts += svgLineChart(category.title + ' Top100 五档销量MOM', fineCombined, FINE_BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#1d4ed8', '#0891b2', '#059669', '#f59e0b', '#dc2626'][i] })), true);
+  rankCharts += svgLineChart(category.title + ' Top100 头/中/尾销量MOM', tierCombined, BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#2563eb', '#059669', '#f97316'][i] })), true) + '</div>';
+  out += subsection(id + '-1-5', sectionNo + '.5 BSR Top100 五档与头中尾 MOM', rankCharts);
+  let tierBody = '';
+  for (const band of BANDS) tierBody += tierTable(category.tiers[band.key], band.name);
+  out += subsection(id + '-1-6', sectionNo + '.6 头部 / 中部 / 尾部明细', tierBody);
+  const analysisItems = narrative(category, overall, pp, nonpp).map((paragraph) => '<li>' + esc(paragraph) + '</li>').join('');
+  out += subsection(id + '-1-7', sectionNo + '.7 数据驱动文字分析', '<div class="analysis"><ul class="analysis-list">' + analysisItems + '</ul></div>');
+  out += '</section>';
   return out;
 }
 
@@ -619,8 +627,7 @@ function genimoSection(category, overall, pp, genimoPP) {
   });
   let out = '<section id="genimo"><h2>第四部分｜GENIMO 品牌分析</h2>';
   out += '<p class="lead">GENIMO 是整体市场中的品牌视角。本部分同时给出 GENIMO 在整体市场的份额、BSR Top100表现、头中尾分层与基于原始数据的 2027 年行动建议。</p>';
-  out += '<h3>4.1 月度表现与整体市场份额</h3>';
-  out += table(['月份', 'GENIMO Listing数', '销量', '销售额($)', '平均标价($)', '销量占整体', '销售额占整体', '销量MOM', '销售额MOM', 'Top100 Listing数'], rows);
+  out += subsection('genimo-4-1', '4.1 月度表现与整体市场份额', table(['月份', 'GENIMO Listing数', '销量', '销售额($)', '平均标价($)', '销量占整体', '销售额占整体', '销量MOM', '销售额MOM', 'Top100 Listing数'], rows));
   const ppRows = genimoPP.monthly.map((r, i) => {
     const base = pp.monthly[i] || {};
     return [
@@ -635,23 +642,27 @@ function genimoSection(category, overall, pp, genimoPP) {
       fmtPct(r.momRevenue)
     ];
   });
-  out += '<h3>4.2 GENIMO 在 PP 市场中的表现</h3>';
-  out += '<p>PP市场份额分母为PP整体盘；GENIMO在PP中的统计仍沿用父ASIN优先/ASIN去重和Top100先筛选规则。</p>';
-  out += table(['月份', 'GENIMO PP Listing数', 'PP内销量', 'PP内销售额($)', '平均标价($)', '销量占PP', '销售额占PP', '销量MOM', '销售额MOM'], ppRows);
-  out += '<div class="charts">' + svgBarChart('GENIMO PP 月销量', genimoPP.monthly, 'sales', '#be185d', 0) + svgBarChart('GENIMO PP 月销售额', genimoPP.monthly, 'revenue', '#9d174d', 2) + '</div>';
-  out += '<h3>4.3 GENIMO 趋势图</h3><div class="charts">' + svgBarChart('GENIMO 月销量', category.monthly, 'sales', '#9333ea', 0);
-  out += svgBarChart('GENIMO 月销售额', category.monthly, 'revenue', '#c026d3', 2);
-  out += svgLineChart('GENIMO 销量MOM（去年同月）', category.monthly, [{ name: '销量MOM', field: 'momSales', color: '#2563eb' }], true);
-  out += '</div><h3>4.4 GENIMO BSR 头中尾与五档</h3>';
- for (const band of BANDS) out += tierTable(category.tiers[band.key], 'GENIMO ' + band.name);
-  out += '<h3>4.5 GENIMO 年度 YOY</h3>' + annualTable(category.annual, category.topAnnual);
+  let ppBody = '<p>PP市场份额分母为PP整体盘；GENIMO在PP中的统计仍沿用父ASIN优先/ASIN去重和Top100先筛选规则。</p>';
+  ppBody += table(['月份', 'GENIMO PP Listing数', 'PP内销量', 'PP内销售额($)', '平均标价($)', '销量占PP', '销售额占PP', '销量MOM', '销售额MOM'], ppRows);
+  ppBody += '<div class="charts">' + svgBarChart('GENIMO PP 月销量', genimoPP.monthly, 'sales', '#be185d', 0) + svgBarChart('GENIMO PP 月销售额', genimoPP.monthly, 'revenue', '#9d174d', 2) + '</div>';
+  out += subsection('genimo-4-2', '4.2 GENIMO 在 PP 市场中的表现', ppBody);
+  let genimoCharts = '<div class="charts">' + svgBarChart('GENIMO 月销量', category.monthly, 'sales', '#9333ea', 0);
+  genimoCharts += svgBarChart('GENIMO 月销售额', category.monthly, 'revenue', '#c026d3', 2);
+  genimoCharts += svgLineChart('GENIMO 销量MOM（去年同月）', category.monthly, [{ name: '销量MOM', field: 'momSales', color: '#2563eb' }], true) + '</div>';
+  out += subsection('genimo-4-3', '4.3 GENIMO 趋势图', genimoCharts);
+  let genimoTierBody = '';
+  for (const band of BANDS) genimoTierBody += tierTable(category.tiers[band.key], 'GENIMO ' + band.name);
+  out += subsection('genimo-4-4', '4.4 GENIMO BSR 头中尾与五档', genimoTierBody);
+  out += subsection('genimo-4-5', '4.5 GENIMO 年度 YOY', annualTable(category.annual, category.topAnnual));
   const latest = lastNonEmpty(category.monthly);
   const latestTop = category.topMonthly.find((r) => r.month === latest.month) || {};
-  out += '<h3>4.6 2027 年建议（仅基于当前原始字段）</h3><div class="analysis">';
-  out += '<p>先稳定能够进入 BSR 1—100 的链接：最新月 GENIMO Top100 有 ' + fmt(latestTop.count) + ' 个 Listing，销量 ' + fmt(latestTop.sales) + '。产品测试和链接补充应按 1-20、21-50、51-100 三个层级分别记录，不用单一总排名替代层级判断。</p>';
-  out += '<p>用整体市场份额和 PP/高客单价市场拆分制定资源优先级：当 GENIMO 在某一市场的销量或销售额占比连续上升时，优先补充该市场相同字段完整且 BSR 可追踪的链接；当份额下降时，先核对缺失销量、销售额、价格和 BSR 的覆盖率，再决定是否调整产品组合。</p>';
-  out += '<p>建立月度复盘表：销量、销售额、平均标价、销量MOM、销售额MOM、Top100数量、头中尾占比和标题中 plastic 标记必须同批次留痕。报告只使用原始工作簿已有字段，不推导利润、成本、广告或库存指标。</p>';
-  out += '</div></section>';
+  const advice = [
+    '先稳定能够进入 BSR 1—100 的链接：最新月 GENIMO Top100 有 ' + fmt(latestTop.count) + ' 个 Listing，销量 ' + fmt(latestTop.sales) + '。产品测试和链接补充应按 1-20、21-50、51-100 三个层级分别记录，不用单一总排名替代层级判断。',
+    '用整体市场份额和 PP/高客单价市场拆分制定资源优先级：当 GENIMO 在某一市场的销量或销售额占比连续上升时，优先补充该市场相同字段完整且 BSR 可追踪的链接；当份额下降时，先核对缺失销量、销售额、价格和 BSR 的覆盖率，再决定是否调整产品组合。',
+    '建立月度复盘表：销量、销售额、平均标价、销量MOM、销售额MOM、Top100数量、头中尾占比和标题中 plastic 标记必须同批次留痕。报告只使用原始工作簿已有字段，不推导利润、成本、广告或库存指标。'
+  ].map((item) => '<li>' + esc(item) + '</li>').join('');
+  out += subsection('genimo-4-6', '4.6 2027 年建议（仅基于当前原始字段）', '<div class="analysis"><ul class="analysis-list">' + advice + '</ul></div>');
+  out += '</section>';
   return out;
 }
 
@@ -680,19 +691,59 @@ function buildHtml(raw, categories) {
   const detectedHeaderRows = Array.from(new Set(raw.sheetStats.map((item) => item.headerRow))).sort((a, b) => a - b);
   const generated = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
   const compatibilityCss = '.notice,.meta{padding:14px 16px;margin:14px 0;border:1px solid var(--line);background:var(--surface-soft);color:var(--muted)}.notice{border-left:2px solid var(--warning)}.notice b,.meta b{color:var(--text)}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:22px 0}.card{min-height:120px;padding:18px;border:1px solid var(--line);background:var(--card-bg);box-shadow:var(--shadow)}.card b,.card small{display:block;color:var(--muted);font-size:14px}.card strong{display:block;margin:13px 0 7px;font-family:var(--display);font-size:32px;font-weight:400}.charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.chart{min-width:0;margin:0;padding:14px;border:1px solid var(--line);background:var(--surface-soft);overflow:auto}.chart h4{margin:0;color:var(--text)}.chart svg{display:block;width:100%;height:auto;min-width:390px}.axis-label,.legend-label{font-size:10px;fill:var(--muted)}.analysis{padding:15px;border:1px solid var(--line);background:var(--surface-soft)}.analysis p{margin:8px 0;color:var(--muted)}footer{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}@media(max-width:980px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.charts{grid-template-columns:1fr}}@media(max-width:560px){.cards{grid-template-columns:1fr}}';
+  const navGroup = (target, icon, label, items) => {
+    const links = items.map(([href, text]) => '<a href="#' + esc(href) + '">' + esc(text) + '</a>').join('');
+    return '<details class="nav-group" data-target="' + esc(target) + '" open><summary><span class="nav-icon">' + esc(icon) + '</span><span>' + esc(label) + '</span><span class="nav-chevron" aria-hidden="true">⌄</span></summary><div class="nav-subitems">' + links + '</div></details>';
+  };
+  const nav = navGroup('dashboard', '总', '市场总览｜数据口径', [
+    ['dashboard-0-1', '0.1 范围与关键指标'],
+    ['dashboard-0-2', '0.2 数据口径与来源'],
+    ['dashboard-0-3', '0.3 原始字段覆盖']
+  ]) + navGroup('overall', '整', '整体市场', [
+    ['overall-1-1', '1.1 月度汇总与可回勾数据'],
+    ['overall-1-2', '1.2 BSR Top100 月度明细'],
+    ['overall-1-3', '1.3 年度 YOY 汇总'],
+    ['overall-1-4', '1.4 市场趋势图'],
+    ['overall-1-5', '1.5 BSR Top100 五档与头中尾 MOM'],
+    ['overall-1-6', '1.6 头部 / 中部 / 尾部明细'],
+    ['overall-1-7', '1.7 数据驱动文字分析']
+  ]) + navGroup('pp', 'PP', 'PP市场', [
+    ['pp-1-1', '2.1 月度汇总与可回勾数据'],
+    ['pp-1-2', '2.2 BSR Top100 月度明细'],
+    ['pp-1-3', '2.3 年度 YOY 汇总'],
+    ['pp-1-4', '2.4 市场趋势图'],
+    ['pp-1-5', '2.5 BSR Top100 五档与头中尾 MOM'],
+    ['pp-1-6', '2.6 头部 / 中部 / 尾部明细'],
+    ['pp-1-7', '2.7 数据驱动文字分析']
+  ]) + navGroup('nonpp', '高', '高客单价市场', [
+    ['nonpp-1-1', '3.1 月度汇总与可回勾数据'],
+    ['nonpp-1-2', '3.2 BSR Top100 月度明细'],
+    ['nonpp-1-3', '3.3 年度 YOY 汇总'],
+    ['nonpp-1-4', '3.4 市场趋势图'],
+    ['nonpp-1-5', '3.5 BSR Top100 五档与头中尾 MOM'],
+    ['nonpp-1-6', '3.6 头部 / 中部 / 尾部明细'],
+    ['nonpp-1-7', '3.7 数据驱动文字分析']
+  ]) + navGroup('genimo', 'G', 'GENIMO品牌', [
+    ['genimo-4-1', '4.1 月度表现与整体市场份额'],
+    ['genimo-4-2', '4.2 GENIMO 在 PP 市场中的表现'],
+    ['genimo-4-3', '4.3 GENIMO 趋势图'],
+    ['genimo-4-4', '4.4 GENIMO BSR 头中尾与五档'],
+    ['genimo-4-5', '4.5 GENIMO 年度 YOY'],
+    ['genimo-4-6', '4.6 2027 年建议']
+  ]);
   let html = '<!doctype html><html lang="zh-CN" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>户外地垫市场洞察 · Outdoor Rug Intelligence</title><style>' + UI_CSS + compatibilityCss + '</style></head><body><div class="app-shell">';
-  html += '<aside class="sidebar"><div class="brand"><div class="brand-mark"></div><div><strong>Market Intelligence</strong><small>户外地垫市场分析系统</small></div></div><div class="local-badge"><i></i> DATA · VERIFIED</div><span class="nav-label">市场分析</span><nav><a href="#dashboard"><span class="nav-icon">总</span>市场总览</a><a href="#overall"><span class="nav-icon">整</span>整体市场</a><a href="#pp"><span class="nav-icon">PP</span>PP市场</a><a href="#nonpp"><span class="nav-icon">高</span>高客单价市场</a><a href="#genimo"><span class="nav-icon">G</span>GENIMO品牌</a><a href="#source"><span class="nav-icon">径</span>数据口径</a></nav><div class="sidebar-footer"><span>可比数据范围</span><strong>' + esc(MONTHS[0]) + ' — ' + esc(MONTHS[MONTHS.length - 1]) + '</strong><small>' + fmt(MONTHS.length) + '个月 · 原始主源直读</small></div></aside>';
-  html += '<div class="workspace"><header class="topbar"><div><span class="eyebrow">OUTDOOR RUG MARKET INTELLIGENCE</span><h1>市场总览</h1><p>销量、销售额、均价 · 小类BSR Top100 · 月度MOM（去年同月） · 年度YOY · SPEC 2.0</p></div><div class="top-actions"><span class="privacy-chip"><i></i> 源数据只读</span><button class="theme-button" id="theme-toggle" aria-label="切换主题">☀</button></div></header><main class="content">';
-  html += '<div id="dashboard" class="scope-notice"><span>◎</span><div><b>分析范围：</b>原始工作簿覆盖 ' + MONTHS.length + ' 个月；整体市场由 PP 与高客单价市场构成，GENIMO 作为品牌视角单独分析。BSR Top100 使用 1—100（包含100）的独立池。</div></div>';
-  html += '<div class="metrics-grid"><article class="metric-card"><span class="metric-label">原始有效行</span><strong class="metric-value">' + fmt(rawCount) + '</strong><span class="metric-note">逐月明细读取</span></article><article class="metric-card"><span class="metric-label">整体盘去重 Listing</span><strong class="metric-value">' + fmt(categories.overall.fullRows.length) + '</strong><span class="metric-note">父ASIN优先 / ASIN兜底</span></article><article class="metric-card"><span class="metric-label">BSR Top100 去重</span><strong class="metric-value">' + fmt(categories.overall.topRows.length) + '</strong><span class="metric-note">小类BSR 1—100 含100</span></article><article class="metric-card"><span class="metric-label">GENIMO Listing</span><strong class="metric-value">' + fmt(categories.genimo.fullRows.length) + '</strong><span class="metric-note">品牌整体视角</span></article></div>';
-  html += '<div id="source" class="scope-notice"><span>◎</span><div><b>口径与来源：</b>整体市场 = PP市场 ∪ 高客单价市场；PP 使用商品标题完整单词 plastic 匹配，高客单价市场为补集。月度 MOM 比较去年同月，年度 YOY 比较上一年度（未完结年度按实际覆盖范围标记）。数据源：' + esc(SOURCE) + '；SHA-256：' + esc(SOURCE_HASH) + '；可解析小类BSR ' + fmt(ranked) + ' 行，Top100候选 ' + fmt(topCandidates) + ' 行；月度子表有数据 ' + fmt(sourceMonthsWithData) + '/' + fmt(raw.sheetStats.length) + '，识别表头行 ' + esc(detectedHeaderRows.join('、')) + '。缺失值不当作零。</div></div>';
-  html += '<div class="meta"><b>统计单元与代表行</b><br>独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）；代表行按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。原始字段覆盖表仅做只读回勾，不参与任何利润推导。</div>';
-  html += '<h3>原始字段覆盖（只读）</h3>' + rawFieldCoverage(raw.rows);
+  html += '<aside class="sidebar"><div class="brand"><div class="brand-mark"></div><div><strong>Market Intelligence</strong><small>户外地垫市场分析系统</small></div></div><div class="local-badge"><i></i> DATA · VERIFIED</div><span class="nav-label">市场分析</span><nav>' + nav + '</nav><div class="sidebar-footer"><span>可比数据范围</span><strong>' + esc(MONTHS[0]) + ' — ' + esc(MONTHS[MONTHS.length - 1]) + '</strong><small>' + fmt(MONTHS.length) + '个月 · 原始主源直读</small></div></aside>';
+  html += '<div class="workspace"><header class="topbar"><div><span class="eyebrow">MARKET OVERVIEW · SPEC 2.0</span><h1>户外地垫市场分析</h1><p>整体市场、PP市场、高客单价市场与 GENIMO 品牌 · 销量、销售额、均价 · BSR Top100 · MOM / YOY</p></div><div class="top-actions"><span class="privacy-chip"><i></i> 源数据只读</span><button class="theme-button" id="theme-toggle" aria-label="切换主题">☀</button></div></header><main class="content">';
+  html += '<section id="dashboard" class="overview-section"><div class="section-kicker">报告导航 · 0</div><h2>市场总览｜范围与数据口径</h2><p class="lead">先确认数据范围、市场划分和统计单元，再进入四个分析部分。下面每个小节都可以点击左侧导航展开，也可以点击标题前的小三角收起。</p>';
+  html += subsection('dashboard-0-1', '0.1 分析范围与关键指标', '<div class="scope-notice"><span>◎</span><div><b>分析范围：</b>原始工作簿覆盖 ' + MONTHS.length + ' 个月；整体市场由 PP 与高客单价市场构成，GENIMO 作为品牌视角单独分析。BSR Top100 使用 1—100（包含100）的独立池。</div></div><div class="metrics-grid"><article class="metric-card"><span class="metric-label">原始有效行</span><strong class="metric-value">' + fmt(rawCount) + '</strong><span class="metric-note">逐月明细读取</span></article><article class="metric-card"><span class="metric-label">整体盘去重 Listing</span><strong class="metric-value">' + fmt(categories.overall.fullRows.length) + '</strong><span class="metric-note">父ASIN优先 / ASIN兜底</span></article><article class="metric-card"><span class="metric-label">BSR Top100 去重</span><strong class="metric-value">' + fmt(categories.overall.topRows.length) + '</strong><span class="metric-note">小类BSR 1—100 含100</span></article><article class="metric-card"><span class="metric-label">GENIMO Listing</span><strong class="metric-value">' + fmt(categories.genimo.fullRows.length) + '</strong><span class="metric-note">品牌整体视角</span></article></div>');
+  html += subsection('dashboard-0-2', '0.2 数据口径与来源', '<div class="scope-notice"><span>◎</span><div><b>口径与来源：</b>整体市场 = PP市场 ∪ 高客单价市场；PP 使用商品标题完整单词 plastic 匹配，高客单价市场为补集。月度 MOM 比较去年同月，年度 YOY 比较上一年度（未完结年度按实际覆盖范围标记）。数据源：' + esc(SOURCE) + '；SHA-256：' + esc(SOURCE_HASH) + '；可解析小类BSR ' + fmt(ranked) + ' 行，Top100候选 ' + fmt(topCandidates) + ' 行；月度子表有数据 ' + fmt(sourceMonthsWithData) + '/' + fmt(raw.sheetStats.length) + '，识别表头行 ' + esc(detectedHeaderRows.join('、')) + '。缺失值不当作零。</div></div><div class="meta"><b>统计单元与代表行</b><br>独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）；代表行按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。原始字段覆盖表仅做只读回勾，不参与任何利润推导。</div>');
+  html += subsection('dashboard-0-3', '0.3 原始字段覆盖（只读）', rawFieldCoverage(raw.rows));
+  html += '</section>';
   html += marketSection('overall', '第一部分', categories.overall, categories.overall, categories.pp, categories.nonpp);
   html += marketSection('pp', '第二部分', categories.pp, categories.overall, categories.pp, categories.nonpp);
   html += marketSection('nonpp', '第三部分', categories.nonpp, categories.overall, categories.pp, categories.nonpp);
   html += genimoSection(categories.genimo, categories.overall, categories.pp, categories.genimoPP);
-  html += '<footer>报告由 src/build_spec2_html.mjs 从原始工作簿生成。当前页面保留原版侧栏、主题切换和导航结构；如源表发生更换，请先确认文件身份、月份覆盖和列名，再重新生成。</footer></main></div></div><script>(function(){var root=document.documentElement,button=document.getElementById("theme-toggle"),saved="dark";try{saved=localStorage.getItem("market-report-theme")||"dark"}catch(e){}root.dataset.theme=saved;button.textContent=saved==="dark"?"☀":"☾";button.addEventListener("click",function(){var next=root.dataset.theme==="dark"?"light":"dark";root.dataset.theme=next;button.textContent=next==="dark"?"☀":"☾";try{localStorage.setItem("market-report-theme",next)}catch(e){}});var links=[].slice.call(document.querySelectorAll(".sidebar nav a"));var targets=[].slice.call(document.querySelectorAll("section[id],#dashboard,#source"));if("IntersectionObserver" in window){var observer=new IntersectionObserver(function(entries){entries.forEach(function(entry){if(entry.isIntersecting){links.forEach(function(a){a.classList.toggle("is-active",a.getAttribute("href")==="#"+entry.target.id)})}})},{rootMargin:"-20% 0px -70% 0px"});targets.forEach(function(el){observer.observe(el)})}})();</script></body></html>';
+  html += '<footer>报告由 src/build_spec2_html.mjs 从原始工作簿生成。市场总览与数据口径已合并；左侧导航可展开到每个小节，正文小节可用小三角折叠。源表发生更换时，请先确认文件身份、月份覆盖和列名，再重新生成。</footer></main></div></div><script>(function(){var root=document.documentElement,button=document.getElementById("theme-toggle"),saved="dark";try{saved=localStorage.getItem("market-report-theme")||"dark"}catch(e){}root.dataset.theme=saved;button.textContent=saved==="dark"?"☀":"☾";button.addEventListener("click",function(){var next=root.dataset.theme==="dark"?"light":"dark";root.dataset.theme=next;button.textContent=next==="dark"?"☀":"☾";try{localStorage.setItem("market-report-theme",next)}catch(e){}});var links=[].slice.call(document.querySelectorAll(".sidebar nav a"));var groups=[].slice.call(document.querySelectorAll(".nav-group"));var targets=[].slice.call(document.querySelectorAll(".subsection[id],section[id]"));function openTarget(id){var el=document.getElementById(id);if(!el)return;var details=el.closest("details");if(details)details.open=true;var section=el.closest("section");if(section){var group=document.querySelector(\'.nav-group[data-target="\'+section.id+\'"]\');if(group)group.open=true}el.scrollIntoView({behavior:"smooth",block:"start"})}links.forEach(function(a){a.addEventListener("click",function(){openTarget(a.getAttribute("href").slice(1))})});function setActive(el){var id=el.id;links.forEach(function(a){a.classList.toggle("is-active",a.getAttribute("href")==="#"+id)});var section=el.closest("section[id]");var sectionId=section?section.id:(el.matches("section[id]")?el.id:null);groups.forEach(function(group){group.classList.toggle("is-active",!!sectionId&&group.dataset.target===sectionId)})}if("IntersectionObserver" in window){var observer=new IntersectionObserver(function(entries){entries.forEach(function(entry){if(entry.isIntersecting)setActive(entry.target)})},{rootMargin:"-18% 0px -68% 0px"});targets.forEach(function(el){observer.observe(el)})}})();</script></body></html>';
   return html;
 }
 
