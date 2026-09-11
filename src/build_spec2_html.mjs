@@ -309,17 +309,17 @@ function enrichTrend(months, rows) {
   for (const month of months) base.set(month, summarise(byMonth.get(month) || []));
   return months.map((month) => {
     const current = base.get(month);
-    const mom = base.get(previousMonth(month)) || {};
-    const yoy = base.get(previousYear(month)) || {};
+    // Project reporting convention: monthly MOM means the current month
+    // versus the same month in the prior year. Annual comparisons are shown
+    // separately as YOY in the annual tables.
+    const mom = base.get(previousYear(month)) || {};
     return {
       month,
       ...current,
       momSales: percent(current.sales, mom.sales),
       momRevenue: percent(current.revenue, mom.revenue),
       momAvgPrice: percent(current.avgPrice, mom.avgPrice),
-      yoySales: percent(current.sales, yoy.sales),
-      yoyRevenue: percent(current.revenue, yoy.revenue),
-      yoyAvgPrice: percent(current.avgPrice, yoy.avgPrice)
+      momPairedAsp: percent(current.pairedAsp, mom.pairedAsp)
     };
   });
 }
@@ -335,9 +335,25 @@ function annualRows(months, rows) {
   const summaries = years.map((year) => ({ year, ...summarise(byYear.get(year)) }));
   return summaries.map((current, i) => {
     const previous = summaries[i - 1] || {};
-    const yoySales = percent(current.sales, previous.sales);
-    const yoyRevenue = percent(current.revenue, previous.revenue);
-    return { ...current, yoySales, yoyRevenue };
+    const previousYear = previous.year;
+    const currentMonths = new Set(byYear.get(current.year).map((row) => row.month.slice(4, 6)));
+    const previousMonths = previousYear ? new Set(byYear.get(previousYear).map((row) => row.month.slice(4, 6))) : new Set();
+    const commonMonths = Array.from(currentMonths).filter((month) => previousMonths.has(month)).sort();
+    const currentComparable = commonMonths.length
+      ? summarise(byYear.get(current.year).filter((row) => commonMonths.includes(row.month.slice(4, 6))))
+      : {};
+    const previousComparable = commonMonths.length
+      ? summarise(byYear.get(previousYear).filter((row) => commonMonths.includes(row.month.slice(4, 6))))
+      : {};
+    const yoyPeriod = previousYear && commonMonths.length
+      ? previousYear + '.' + Number(commonMonths[0]) + '—' + current.year + '.' + Number(commonMonths[commonMonths.length - 1])
+      : null;
+    return {
+      ...current,
+      yoySales: percent(currentComparable.sales, previousComparable.sales),
+      yoyRevenue: percent(currentComparable.revenue, previousComparable.revenue),
+      yoyPeriod
+    };
   });
 }
 
@@ -473,13 +489,11 @@ function trendTable(data, topData) {
     fmt(r.revenue, 2),
     fmt(r.avgPrice, 2),
     fmt(r.pairedAsp, 2),
-    fmtPct(r.yoySales),
     fmtPct(r.momSales),
-    fmtPct(r.yoyRevenue),
     fmtPct(r.momRevenue),
     fmt(topData[i] ? topData[i].count : null)
   ]);
-  return table(['月份', '整体商品数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量同比', '销量环比', '销售额同比', '销售额环比', 'BSR前100商品数'], rows);
+  return table(['月份', '整体商品数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', 'BSR前100商品数'], rows);
 }
 
 function topTrendTable(data) {
@@ -490,12 +504,10 @@ function topTrendTable(data) {
     fmt(r.revenue, 2),
     fmt(r.avgPrice, 2),
     fmt(r.pairedAsp, 2),
-    fmtPct(r.yoySales),
     fmtPct(r.momSales),
-    fmtPct(r.yoyRevenue),
     fmtPct(r.momRevenue)
   ]);
-  return table(['月份', 'Top100商品数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量同比', '销量环比', '销售额同比', '销售额环比'], rows);
+  return table(['月份', 'Top100商品数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM'], rows);
 }
 
 function annualTable(data, topData) {
@@ -516,7 +528,7 @@ function annualTable(data, topData) {
       fmtPct(top.yoyRevenue)
     ];
   });
-  return table(['年份', '整体商品数', '整体销量', '整体销售额($)', '整体平均标价($)', '整体销量同比', '整体销售额同比', 'Top100商品数', 'Top100销量', 'Top100销售额($)', 'Top100销量同比', 'Top100销售额同比'], rows);
+  return table(['年份', '整体商品数', '整体销量', '整体销售额($)', '整体平均标价($)', '整体销量YOY', '整体销售额YOY', 'Top100商品数', 'Top100销量', 'Top100销售额($)', 'Top100销量YOY', 'Top100销售额YOY'], rows);
 }
 
 function tierTable(data, title) {
@@ -525,30 +537,30 @@ function tierTable(data, title) {
     fmt(r.count),
     fmt(r.sales),
     fmt(r.revenue, 2),
-    fmtPct(r.yoySales),
-    fmtPct(r.momSales)
+    fmtPct(r.momSales),
+    fmtPct(r.momRevenue)
   ]);
-  return '<h4>' + esc(title) + '</h4>' + table(['月份', '商品数', '销量', '销售额($)', '销量同比', '销量环比'], rows);
+  return '<h4>' + esc(title) + '</h4>' + table(['月份', '商品数', '销量', '销售额($)', '销量MOM', '销售额MOM'], rows);
 }
 
 function narrative(category, overall, pp, nonpp) {
   const latest = lastNonEmpty(category.monthly);
-  const prior = category.monthly[category.monthly.findIndex((r) => r.month === latest.month) - 1] || {};
   const top = category.topMonthly.find((r) => r.month === latest.month) || {};
   const pieces = [];
   pieces.push('截至 ' + latest.month.slice(0, 4) + '.' + Number(latest.month.slice(4, 6)) + '，' + category.title + '整体盘共有 ' + fmt(latest.count) + ' 个去重 Listing，销量 ' + fmt(latest.sales) + '，销售额 $' + fmt(latest.revenue, 2) + '，平均标价 $' + fmt(latest.avgPrice, 2) + '。');
-  pieces.push('与上月相比，销量' + (latest.momSales === null ? '缺少可比月份' : (latest.momSales >= 0 ? '增长 ' : '下降 ') + fmtPct(Math.abs(latest.momSales))) + '；与去年同月相比，销量' + (latest.yoySales === null ? '缺少可比月份' : (latest.yoySales >= 0 ? '增长 ' : '下降 ') + fmtPct(Math.abs(latest.yoySales)) ) + '。');
+  pieces.push('与去年同月相比（MOM），销量' + (latest.momSales === null ? '缺少可比月份' : (latest.momSales >= 0 ? '增长 ' : '下降 ') + fmtPct(Math.abs(latest.momSales))) + '，销售额' + (latest.momRevenue === null ? '缺少可比月份' : (latest.momRevenue >= 0 ? '增长 ' : '下降 ') + fmtPct(Math.abs(latest.momRevenue)) ) + '。');
   pieces.push('BSR 1—100（包含100）在该月覆盖 ' + fmt(top.count) + ' 个 Listing，销量 ' + fmt(top.sales) + '，销售额 $' + fmt(top.revenue, 2) + '；Top100与整体盘的差异用于判断头部集中度。');
   if (category.title === '整体市场') {
     const p = lastNonEmpty(pp.monthly);
     const n = lastNonEmpty(nonpp.monthly);
-    pieces.push('整体市场按完整单词 plastic 划分为 PP 与非PP，两者并集构成整体市场；最新月 PP 销量为 ' + fmt(p.sales) + '，非PP销量为 ' + fmt(n.sales) + '，请结合覆盖率和缺失值复核方向。');
+    pieces.push('整体市场按完整单词 plastic 划分为 PP 与高客单价市场，两者并集构成整体市场；最新月 PP 销量为 ' + fmt(p.sales) + '，高客单价市场销量为 ' + fmt(n.sales) + '，请结合覆盖率和缺失值复核方向。');
   }
   pieces.push('原始销量覆盖率 ' + fmtPct(latest.salesCoverage) + '，销售额覆盖率 ' + fmtPct(latest.revenueCoverage) + '；空值保留为空，不把缺失当作零。');
   return pieces;
 }
 
 function marketSection(id, number, category, overall, pp, nonpp) {
+  const sectionNo = number === '第一部分' ? '1' : number === '第二部分' ? '2' : '3';
   const latest = lastNonEmpty(category.monthly);
   const topLatest = category.topMonthly.find((r) => r.month === latest.month) || {};
   const fineCombined = MONTHS.map((month, i) => {
@@ -562,27 +574,27 @@ function marketSection(id, number, category, overall, pp, nonpp) {
     return row;
   });
   let out = '<section id="' + id + '"><h2>' + number + '｜' + esc(category.title) + '</h2>';
-  out += '<p class="lead">本部分先展示整体盘，再展示 BSR 1—100（包含100）的 Top100 视图和头部/中部/尾部层级。同比为去年同月，环比为上一个自然月。</p>';
+  out += '<p class="lead">本部分按“整体盘 → BSR Top100 → 头部/中部/尾部 → 五档 → 文字分析”展开。月度 MOM 为本月与去年同月比较，年度 YOY 为本年与上一年度比较。</p>';
   out += '<div class="cards"><div class="card"><b>最新月整体销量</b><strong>' + fmt(latest.sales) + '</strong><small>' + esc(latest.month) + '</small></div>';
   out += '<div class="card"><b>最新月整体销售额</b><strong>$' + fmt(latest.revenue, 2) + '</strong><small>原始月销售额合计</small></div>';
   out += '<div class="card"><b>最新月 Top100 销量</b><strong>' + fmt(topLatest.sales) + '</strong><small>' + fmt(topLatest.count) + ' 个 Listing</small></div>';
   out += '<div class="card"><b>最新月平均标价</b><strong>$' + fmt(latest.avgPrice, 2) + '</strong><small>按有价格记录算术平均</small></div></div>';
-  out += '<h3>月度汇总与可回勾数据</h3>' + trendTable(category.monthly, category.topMonthly);
-  out += '<h4>BSR Top100 月度明细</h4>' + topTrendTable(category.topMonthly);
-  out += '<h4>年度与同周期同比</h4>' + annualTable(category.annual, category.topAnnual);
-  out += '<div class="charts">' + svgBarChart(category.title + '月销量', category.monthly, 'sales', '#2563eb', 0);
+  out += '<h3>' + sectionNo + '.1 月度汇总与可回勾数据</h3>' + trendTable(category.monthly, category.topMonthly);
+  out += '<h3>' + sectionNo + '.2 BSR Top100 月度明细</h3>' + topTrendTable(category.topMonthly);
+  out += '<h3>' + sectionNo + '.3 年度 YOY 汇总</h3>' + annualTable(category.annual, category.topAnnual);
+  out += '<h3>' + sectionNo + '.4 市场趋势图</h3><div class="charts">' + svgBarChart(category.title + '月销量', category.monthly, 'sales', '#2563eb', 0);
   out += svgBarChart(category.title + '月销售额', category.monthly, 'revenue', '#0f766e', 2);
   out += svgLineChart(category.title + '平均标价趋势', category.monthly, [{ name: '平均标价($)', field: 'avgPrice', color: '#7c3aed' }]);
-  out += svgLineChart(category.title + '销量同比与环比', category.monthly, [{ name: '同比', field: 'yoySales', color: '#dc2626' }, { name: '环比', field: 'momSales', color: '#2563eb' }], true);
-  out += '</div><h3>BSR Top100 与五档环比</h3>';
-  out += '<p>Top100 先按可解析的小类BSR筛选 1—100（含100），再按父ASIN优先、否则ASIN去重；五档互斥为 1-5、6-10、11-20、21-50、51-100。</p>';
+  out += svgLineChart(category.title + '销量MOM（去年同月）', category.monthly, [{ name: '销量MOM', field: 'momSales', color: '#2563eb' }], true);
+  out += '</div><h3>' + sectionNo + '.5 BSR Top100 五档与头中尾 MOM</h3>';
+  out += '<p>Top100 先按可解析的小类BSR筛选 1—100（含100），再按父ASIN优先、否则ASIN去重；五档互斥为 1-5、6-10、11-20、21-50、51-100。MOM统一比较去年同月。</p>';
   out += '<div class="charts">';
-  out += svgLineChart(category.title + ' Top100 五档销量环比', fineCombined, FINE_BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#1d4ed8', '#0891b2', '#059669', '#f59e0b', '#dc2626'][i] })), true);
-  out += svgLineChart(category.title + ' Top100 头/中/尾销量环比', tierCombined, BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#2563eb', '#059669', '#f97316'][i] })), true);
+  out += svgLineChart(category.title + ' Top100 五档销量MOM', fineCombined, FINE_BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#1d4ed8', '#0891b2', '#059669', '#f59e0b', '#dc2626'][i] })), true);
+  out += svgLineChart(category.title + ' Top100 头/中/尾销量MOM', tierCombined, BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#2563eb', '#059669', '#f97316'][i] })), true);
   out += '</div>';
-  out += '<h3>头部 / 中部 / 尾部</h3>';
+  out += '<h3>' + sectionNo + '.6 头部 / 中部 / 尾部明细</h3>';
   for (const band of BANDS) out += tierTable(category.tiers[band.key], band.name);
-  out += '<h3>数据驱动文字分析</h3><div class="analysis">';
+  out += '<h3>' + sectionNo + '.7 数据驱动文字分析</h3><div class="analysis">';
   for (const paragraph of narrative(category, overall, pp, nonpp)) out += '<p>' + esc(paragraph) + '</p>';
   out += '</div></section>';
   return out;
@@ -600,13 +612,15 @@ function genimoSection(category, overall, pp, genimoPP) {
       fmt(r.avgPrice, 2),
       fmtPct(percent(r.sales, base.sales)),
       fmtPct(percent(r.revenue, base.revenue)),
+      fmtPct(r.momSales),
+      fmtPct(r.momRevenue),
       fmt(top.count)
     ];
   });
   let out = '<section id="genimo"><h2>第四部分｜GENIMO 品牌分析</h2>';
   out += '<p class="lead">GENIMO 是整体市场中的品牌视角。本部分同时给出 GENIMO 在整体市场的份额、BSR Top100表现、头中尾分层与基于原始数据的 2027 年行动建议。</p>';
-  out += '<h3>品牌月度表现与整体市场份额</h3>';
- out += table(['月份', 'GENIMO Listing数', '销量', '销售额($)', '平均标价($)', '销量占整体', '销售额占整体', 'Top100 Listing数'], rows);
+  out += '<h3>4.1 月度表现与整体市场份额</h3>';
+  out += table(['月份', 'GENIMO Listing数', '销量', '销售额($)', '平均标价($)', '销量占整体', '销售额占整体', '销量MOM', '销售额MOM', 'Top100 Listing数'], rows);
   const ppRows = genimoPP.monthly.map((r, i) => {
     const base = pp.monthly[i] || {};
     return [
@@ -617,26 +631,26 @@ function genimoSection(category, overall, pp, genimoPP) {
       fmt(r.avgPrice, 2),
       fmtPct(percent(r.sales, base.sales)),
       fmtPct(percent(r.revenue, base.revenue)),
-      fmtPct(r.yoySales),
-      fmtPct(r.momSales)
+      fmtPct(r.momSales),
+      fmtPct(r.momRevenue)
     ];
   });
-  out += '<h3>GENIMO 在 PP 市场中的表现</h3>';
+  out += '<h3>4.2 GENIMO 在 PP 市场中的表现</h3>';
   out += '<p>PP市场份额分母为PP整体盘；GENIMO在PP中的统计仍沿用父ASIN优先/ASIN去重和Top100先筛选规则。</p>';
-  out += table(['月份', 'GENIMO PP Listing数', 'PP内销量', 'PP内销售额($)', '平均标价($)', '销量占PP', '销售额占PP', '销量同比', '销量环比'], ppRows);
+  out += table(['月份', 'GENIMO PP Listing数', 'PP内销量', 'PP内销售额($)', '平均标价($)', '销量占PP', '销售额占PP', '销量MOM', '销售额MOM'], ppRows);
   out += '<div class="charts">' + svgBarChart('GENIMO PP 月销量', genimoPP.monthly, 'sales', '#be185d', 0) + svgBarChart('GENIMO PP 月销售额', genimoPP.monthly, 'revenue', '#9d174d', 2) + '</div>';
-  out += '<div class="charts">' + svgBarChart('GENIMO 月销量', category.monthly, 'sales', '#9333ea', 0);
+  out += '<h3>4.3 GENIMO 趋势图</h3><div class="charts">' + svgBarChart('GENIMO 月销量', category.monthly, 'sales', '#9333ea', 0);
   out += svgBarChart('GENIMO 月销售额', category.monthly, 'revenue', '#c026d3', 2);
-  out += svgLineChart('GENIMO 销量同比与环比', category.monthly, [{ name: '同比', field: 'yoySales', color: '#dc2626' }, { name: '环比', field: 'momSales', color: '#2563eb' }], true);
-  out += '</div><h3>GENIMO BSR 头中尾</h3>';
+  out += svgLineChart('GENIMO 销量MOM（去年同月）', category.monthly, [{ name: '销量MOM', field: 'momSales', color: '#2563eb' }], true);
+  out += '</div><h3>4.4 GENIMO BSR 头中尾与五档</h3>';
  for (const band of BANDS) out += tierTable(category.tiers[band.key], 'GENIMO ' + band.name);
-  out += '<h3>GENIMO 年度与同周期同比</h3>' + annualTable(category.annual, category.topAnnual);
+  out += '<h3>4.5 GENIMO 年度 YOY</h3>' + annualTable(category.annual, category.topAnnual);
   const latest = lastNonEmpty(category.monthly);
   const latestTop = category.topMonthly.find((r) => r.month === latest.month) || {};
-  out += '<h3>2027 年建议（仅基于当前原始字段）</h3><div class="analysis">';
+  out += '<h3>4.6 2027 年建议（仅基于当前原始字段）</h3><div class="analysis">';
   out += '<p>先稳定能够进入 BSR 1—100 的链接：最新月 GENIMO Top100 有 ' + fmt(latestTop.count) + ' 个 Listing，销量 ' + fmt(latestTop.sales) + '。产品测试和链接补充应按 1-20、21-50、51-100 三个层级分别记录，不用单一总排名替代层级判断。</p>';
-  out += '<p>用整体市场份额和 PP/非PP拆分制定资源优先级：当 GENIMO 在某一市场的销量或销售额占比连续上升时，优先补充该市场相同字段完整且 BSR 可追踪的链接；当份额下降时，先核对缺失销量、销售额、价格和 BSR 的覆盖率，再决定是否调整产品组合。</p>';
-  out += '<p>建立月度复盘表：销量、销售额、平均标价、同比、环比、Top100数量、头中尾占比和标题中 plastic 标记必须同批次留痕。报告只使用原始工作簿已有字段，不推导利润、成本、广告或库存指标。</p>';
+  out += '<p>用整体市场份额和 PP/高客单价市场拆分制定资源优先级：当 GENIMO 在某一市场的销量或销售额占比连续上升时，优先补充该市场相同字段完整且 BSR 可追踪的链接；当份额下降时，先核对缺失销量、销售额、价格和 BSR 的覆盖率，再决定是否调整产品组合。</p>';
+  out += '<p>建立月度复盘表：销量、销售额、平均标价、销量MOM、销售额MOM、Top100数量、头中尾占比和标题中 plastic 标记必须同批次留痕。报告只使用原始工作簿已有字段，不推导利润、成本、广告或库存指标。</p>';
   out += '</div></section>';
   return out;
 }
@@ -649,14 +663,11 @@ function rawFieldCoverage(rows) {
     ['小类BSR', 'rank'],
     ['月销量', 'sales'],
     ['月销售额($)', 'revenue'],
-    ['价格($)', 'price'],
-    ['毛利率（原始）', 'margin'],
-    ['FBA($)（原始）', 'fba'],
-    ['Coupon（原始）', 'coupon']
+    ['价格($)', 'price']
   ];
   const result = fields.map(([name, field]) => {
-    const present = rows.filter((row) => field === 'rank' ? row.rank !== null : (field === 'sales' || field === 'revenue' || field === 'price' || field === 'fba') ? Number.isFinite(row[field]) : clean(row[field]) !== '').length;
-    return [name, fmt(present), fmtPct(rows.length ? present / rows.length : null), field === 'margin' || field === 'fba' || field === 'coupon' ? '仅保留原始值/覆盖率，不参与利润推导' : '参与对应的市场统计或筛选'];
+    const present = rows.filter((row) => field === 'rank' ? row.rank !== null : Number.isFinite(row[field])).length;
+    return [name, fmt(present), fmtPct(rows.length ? present / rows.length : null), '参与对应的市场统计或筛选'];
   });
   return table(['原始字段', '非空/有效行数', '覆盖率', '处理方式'], result);
 }
@@ -665,14 +676,16 @@ function buildHtml(raw, categories) {
   const rawCount = raw.rows.length;
   const ranked = raw.rows.filter((r) => r.rank !== null).length;
   const topCandidates = raw.rows.filter((r) => r.rank !== null && r.rank >= 1 && r.rank <= 100).length;
+  const sourceMonthsWithData = raw.sheetStats.filter((item) => item.rowCount > 0).length;
+  const detectedHeaderRows = Array.from(new Set(raw.sheetStats.map((item) => item.headerRow))).sort((a, b) => a - b);
   const generated = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
   const compatibilityCss = '.notice,.meta{padding:14px 16px;margin:14px 0;border:1px solid var(--line);background:var(--surface-soft);color:var(--muted)}.notice{border-left:2px solid var(--warning)}.notice b,.meta b{color:var(--text)}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:22px 0}.card{min-height:120px;padding:18px;border:1px solid var(--line);background:var(--card-bg);box-shadow:var(--shadow)}.card b,.card small{display:block;color:var(--muted);font-size:14px}.card strong{display:block;margin:13px 0 7px;font-family:var(--display);font-size:32px;font-weight:400}.charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.chart{min-width:0;margin:0;padding:14px;border:1px solid var(--line);background:var(--surface-soft);overflow:auto}.chart h4{margin:0;color:var(--text)}.chart svg{display:block;width:100%;height:auto;min-width:390px}.axis-label,.legend-label{font-size:10px;fill:var(--muted)}.analysis{padding:15px;border:1px solid var(--line);background:var(--surface-soft)}.analysis p{margin:8px 0;color:var(--muted)}footer{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}@media(max-width:980px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.charts{grid-template-columns:1fr}}@media(max-width:560px){.cards{grid-template-columns:1fr}}';
   let html = '<!doctype html><html lang="zh-CN" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>户外地垫市场洞察 · Outdoor Rug Intelligence</title><style>' + UI_CSS + compatibilityCss + '</style></head><body><div class="app-shell">';
-  html += '<aside class="sidebar"><div class="brand"><div class="brand-mark"></div><div><strong>Market Intelligence</strong><small>户外地垫市场分析系统</small></div></div><div class="local-badge"><i></i> DATA · VERIFIED</div><span class="nav-label">市场分析</span><nav><a href="#dashboard"><span class="nav-icon">总</span>市场总览</a><a href="#overall"><span class="nav-icon">整</span>整体市场</a><a href="#pp"><span class="nav-icon">PP</span>PP市场</a><a href="#nonpp"><span class="nav-icon">非</span>非PP市场</a><a href="#genimo"><span class="nav-icon">G</span>GENIMO品牌</a><a href="#source"><span class="nav-icon">径</span>数据口径</a></nav><div class="sidebar-footer"><span>可比数据范围</span><strong>' + esc(MONTHS[0]) + ' — ' + esc(MONTHS[MONTHS.length - 1]) + '</strong><small>' + fmt(MONTHS.length) + '个月 · 原始主源直读</small></div></aside>';
-  html += '<div class="workspace"><header class="topbar"><div><span class="eyebrow">OUTDOOR RUG MARKET INTELLIGENCE</span><h1>市场总览</h1><p>销量、销售额、均价 · 小类BSR Top100 · 月度同比与自然月环比 · SPEC 2.0</p></div><div class="top-actions"><span class="privacy-chip"><i></i> 源数据只读</span><button class="theme-button" id="theme-toggle" aria-label="切换主题">☀</button></div></header><main class="content">';
-  html += '<div id="dashboard" class="scope-notice"><span>◎</span><div><b>分析范围：</b>原始工作簿覆盖 ' + MONTHS.length + ' 个月；整体市场由 PP 与非PP 构成，GENIMO 作为品牌视角单独分析。BSR Top100 使用 1—100（包含100）的独立池。</div></div>';
+  html += '<aside class="sidebar"><div class="brand"><div class="brand-mark"></div><div><strong>Market Intelligence</strong><small>户外地垫市场分析系统</small></div></div><div class="local-badge"><i></i> DATA · VERIFIED</div><span class="nav-label">市场分析</span><nav><a href="#dashboard"><span class="nav-icon">总</span>市场总览</a><a href="#overall"><span class="nav-icon">整</span>整体市场</a><a href="#pp"><span class="nav-icon">PP</span>PP市场</a><a href="#nonpp"><span class="nav-icon">高</span>高客单价市场</a><a href="#genimo"><span class="nav-icon">G</span>GENIMO品牌</a><a href="#source"><span class="nav-icon">径</span>数据口径</a></nav><div class="sidebar-footer"><span>可比数据范围</span><strong>' + esc(MONTHS[0]) + ' — ' + esc(MONTHS[MONTHS.length - 1]) + '</strong><small>' + fmt(MONTHS.length) + '个月 · 原始主源直读</small></div></aside>';
+  html += '<div class="workspace"><header class="topbar"><div><span class="eyebrow">OUTDOOR RUG MARKET INTELLIGENCE</span><h1>市场总览</h1><p>销量、销售额、均价 · 小类BSR Top100 · 月度MOM（去年同月） · 年度YOY · SPEC 2.0</p></div><div class="top-actions"><span class="privacy-chip"><i></i> 源数据只读</span><button class="theme-button" id="theme-toggle" aria-label="切换主题">☀</button></div></header><main class="content">';
+  html += '<div id="dashboard" class="scope-notice"><span>◎</span><div><b>分析范围：</b>原始工作簿覆盖 ' + MONTHS.length + ' 个月；整体市场由 PP 与高客单价市场构成，GENIMO 作为品牌视角单独分析。BSR Top100 使用 1—100（包含100）的独立池。</div></div>';
   html += '<div class="metrics-grid"><article class="metric-card"><span class="metric-label">原始有效行</span><strong class="metric-value">' + fmt(rawCount) + '</strong><span class="metric-note">逐月明细读取</span></article><article class="metric-card"><span class="metric-label">整体盘去重 Listing</span><strong class="metric-value">' + fmt(categories.overall.fullRows.length) + '</strong><span class="metric-note">父ASIN优先 / ASIN兜底</span></article><article class="metric-card"><span class="metric-label">BSR Top100 去重</span><strong class="metric-value">' + fmt(categories.overall.topRows.length) + '</strong><span class="metric-note">小类BSR 1—100 含100</span></article><article class="metric-card"><span class="metric-label">GENIMO Listing</span><strong class="metric-value">' + fmt(categories.genimo.fullRows.length) + '</strong><span class="metric-note">品牌整体视角</span></article></div>';
-  html += '<div id="source" class="scope-notice"><span>◎</span><div><b>口径与来源：</b>整体市场 = PP市场 ∪ 非PP市场；PP 使用商品标题完整单词 plastic 匹配，非PP为补集。月度同比比较去年同月，月度环比比较上一个自然月。数据源：' + esc(SOURCE) + '；SHA-256：' + esc(SOURCE_HASH) + '；可解析小类BSR ' + fmt(ranked) + ' 行，Top100候选 ' + fmt(topCandidates) + ' 行。缺失值不当作零。</div></div>';
+  html += '<div id="source" class="scope-notice"><span>◎</span><div><b>口径与来源：</b>整体市场 = PP市场 ∪ 高客单价市场；PP 使用商品标题完整单词 plastic 匹配，高客单价市场为补集。月度 MOM 比较去年同月，年度 YOY 比较上一年度（未完结年度按实际覆盖范围标记）。数据源：' + esc(SOURCE) + '；SHA-256：' + esc(SOURCE_HASH) + '；可解析小类BSR ' + fmt(ranked) + ' 行，Top100候选 ' + fmt(topCandidates) + ' 行；月度子表有数据 ' + fmt(sourceMonthsWithData) + '/' + fmt(raw.sheetStats.length) + '，识别表头行 ' + esc(detectedHeaderRows.join('、')) + '。缺失值不当作零。</div></div>';
   html += '<div class="meta"><b>统计单元与代表行</b><br>独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）；代表行按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。原始字段覆盖表仅做只读回勾，不参与任何利润推导。</div>';
   html += '<h3>原始字段覆盖（只读）</h3>' + rawFieldCoverage(raw.rows);
   html += marketSection('overall', '第一部分', categories.overall, categories.overall, categories.pp, categories.nonpp);
@@ -700,32 +713,44 @@ function buildDataset() {
   const flags = buildFamilyFlags(raw.rows);
   const fullDedup = dedup(raw.rows, flags);
   const topCandidates = raw.rows.filter((r) => r.rank !== null && r.rank >= 1 && r.rank <= 100);
-  const topDedup = dedup(topCandidates, flags);
+  // Keep a deterministic maximum of 100 listings per month and scope. A
+  // source export can contain tied BSR values, so filtering rank <= 100 alone
+  // can produce more than 100 listings. Rank is the primary order; the stable
+  // family key and source row make ties reproducible for manual rechecks.
+  const selectTop100 = (rows) => {
+    const byMonth = new Map();
+    for (const row of rows) {
+      if (row.rank === null || row.rank < 1 || row.rank > 100) continue;
+      if (!byMonth.has(row.month)) byMonth.set(row.month, []);
+      byMonth.get(row.month).push(row);
+    }
+    return MONTHS.flatMap((month) => (byMonth.get(month) || [])
+      .slice()
+      .sort((a, b) => a.rank - b.rank || a.familyKey.localeCompare(b.familyKey) || a.sourceRow - b.sourceRow)
+      .slice(0, 100));
+  };
+  const topDedup = selectTop100(fullDedup);
+  const ppRows = fullDedup.filter((r) => r.plastic);
+  const nonppRows = fullDedup.filter((r) => !r.plastic);
+  const genimoRows = fullDedup.filter((r) => r.genimo);
+  const genimoPPRows = fullDedup.filter((r) => r.genimo && r.plastic);
   const categories = {
     overall: buildCategory('整体市场', fullDedup, topDedup),
-    pp: buildCategory('PP市场', fullDedup.filter((r) => r.plastic), topDedup.filter((r) => r.plastic)),
-    nonpp: buildCategory('非PP市场', fullDedup.filter((r) => !r.plastic), topDedup.filter((r) => !r.plastic)),
-    genimo: buildCategory('GENIMO品牌', fullDedup.filter((r) => r.genimo), topDedup.filter((r) => r.genimo)),
-    genimoPP: buildCategory('GENIMO PP市场', fullDedup.filter((r) => r.genimo && r.plastic), topDedup.filter((r) => r.genimo && r.plastic))
+    pp: buildCategory('PP市场', ppRows, selectTop100(ppRows)),
+    nonpp: buildCategory('高客单价市场', nonppRows, selectTop100(nonppRows)),
+    genimo: buildCategory('GENIMO品牌', genimoRows, selectTop100(genimoRows)),
+    genimoPP: buildCategory('GENIMO PP市场', genimoPPRows, selectTop100(genimoPPRows))
   };
   for (let i = 0; i < MONTHS.length; i += 1) {
     const overallMonth = categories.overall.monthly[i];
     const ppMonth = categories.pp.monthly[i];
     const nonppMonth = categories.nonpp.monthly[i];
-    const overallTop = categories.overall.topMonthly[i];
-    const ppTop = categories.pp.topMonthly[i];
-    const nonppTop = categories.nonpp.topMonthly[i];
     const fullSales = addMetric(ppMonth.sales, nonppMonth.sales);
     const fullRevenue = addMetric(ppMonth.revenue, nonppMonth.revenue);
-    const topSales = addMetric(ppTop.sales, nonppTop.sales);
-    const topRevenue = addMetric(ppTop.revenue, nonppTop.revenue);
     if (overallMonth.count !== ppMonth.count + nonppMonth.count ||
-        overallTop.count !== ppTop.count + nonppTop.count ||
         !metricEqual(overallMonth.sales, fullSales) ||
-        !metricEqual(overallMonth.revenue, fullRevenue) ||
-        !metricEqual(overallTop.sales, topSales) ||
-        !metricEqual(overallTop.revenue, topRevenue)) {
-      throw new Error('PP/非PP互补校验失败: ' + MONTHS[i]);
+        !metricEqual(overallMonth.revenue, fullRevenue)) {
+      throw new Error('PP/高客单价市场互补校验失败: ' + MONTHS[i]);
     }
   }
   if (!raw.rows.some((row) => row.rank === 100)) throw new Error('原始主源没有检测到 BSR=100，无法确认包含100');
