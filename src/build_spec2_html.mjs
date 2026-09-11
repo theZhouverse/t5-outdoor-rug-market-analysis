@@ -677,7 +677,12 @@ function rawFieldCoverage(rows) {
     ['价格($)', 'price']
   ];
   const result = fields.map(([name, field]) => {
-    const present = rows.filter((row) => field === 'rank' ? row.rank !== null : Number.isFinite(row[field])).length;
+    // Text columns (title/brand/parent) must be counted by non-empty text;
+    // numeric columns use the parsed numeric value. Treating every field as
+    // numeric makes valid text coverage appear as 0.0%.
+    const present = rows.filter((row) => field === 'rank'
+      ? row.rank !== null
+      : clean(row[field]) !== '').length;
     return [name, fmt(present), fmtPct(rows.length ? present / rows.length : null), '参与对应的市场统计或筛选'];
   });
   return table(['原始字段', '非空/有效行数', '覆盖率', '处理方式'], result);
