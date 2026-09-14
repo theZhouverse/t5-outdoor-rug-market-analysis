@@ -18,17 +18,17 @@ const nonppCandidateAudit = dataset.categories.nonpp.topCandidateMonthly.find((r
 assert.equal(raw.length, 1976);
 assert.equal(candidates.length, 114);
 assert.equal(candidateAudit.rawCount, 114);
-assert.equal(candidateAudit.count, 96);
-assert.equal(top.count, 96);
+assert.equal(candidateAudit.count, 114);
+assert.equal(top.count, 114);
 assert.equal(ppCandidateAudit.rawCount + nonppCandidateAudit.rawCount, 114);
-assert.equal(ppCandidateAudit.count + nonppCandidateAudit.count, 96);
+assert.equal(ppCandidateAudit.count + nonppCandidateAudit.count, 114);
 assert.equal(raw.filter((row) => row.rank >= 1 && row.rank <= 100 && row.plastic).length, 65);
 
 console.log(JSON.stringify({
   month,
   rawRows: raw.length,
   bsrCandidateRows: candidates.length,
-  top100DedupListings: top.count,
+  bsrCandidateListingRows: top.count,
   ppCandidateRowsByListingScope: ppCandidateAudit.rawCount,
   nonppCandidateRowsByListingScope: nonppCandidateAudit.rawCount,
   titlePlasticCandidateRows: raw.filter((row) => row.rank >= 1 && row.rank <= 100 && row.plastic).length

@@ -17,7 +17,7 @@ with open(plan,encoding='utf-8') as f:
     if v is not None:sheets[current][(x['row'],c)]=v
 print('Formula plan loaded',flush=True)
 engine=Engine(sheets);differences=[];expected_count=0
-for sn in ['90_原始输入','91_去重明细','92_聚合输入']+[x for x in names if x not in ['90_原始输入','91_去重明细','92_聚合输入']]:
+for sn in ['90_原始输入','91_BSR候选明细','92_聚合输入']+[x for x in names if x not in ['90_原始输入','91_BSR候选明细','92_聚合输入']]:
  for (r,c),v in sheets[sn].items():
   if isinstance(v,dict):
    actual=engine.get(sn,r,c);expected=v.get('v')
@@ -31,7 +31,9 @@ for sn in ['90_原始输入','91_去重明细','92_聚合输入']+[x for x in na
 audit={'engine':'SPEC2.1 explicit Excel subset evaluator (not desktop Excel)','formulaCount':engine.count,'independentExpectedComparisons':expected_count,'mismatches':differences,'mismatchCount':len(differences),'metadata':meta}
 (ROOT/'tmp/spec21_formula_audit.json').write_text(json.dumps(audit,ensure_ascii=False,indent=2),encoding='utf-8')
 if differences:raise RuntimeError('Formula evaluation differs from independently computed source model: '+str(len(differences)))
-outfile=ROOT/'outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-可回勾版.xlsx'
+outfile=Path(os.environ.get('SPEC21_WORKBOOK_PATH', str(ROOT/'outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-可回勾版.xlsx')))
+if not outfile.is_absolute(): outfile=ROOT/outfile
+outfile.parent.mkdir(parents=True,exist_ok=True)
 staging=outfile.with_name('spec21-staging.xlsx');wb=xlsxwriter.Workbook(str(staging),{'constant_memory':True,'strings_to_urls':False});wb.set_calc_mode('auto')
 wb.set_properties({'title':'户外地垫市场分析 SPEC2.1','comments':json.dumps(meta,ensure_ascii=False)})
 formats={
@@ -67,8 +69,8 @@ for sn in names:
   else:s.write(r-1,c-1,v,formats['header'] if secondary_header else formats['input'] if isinstance(v,(int,float)) else formats['wrapped'] if len(str(v))>28 else formats['text'])
   if secondary_header:s.set_row(r-1,46)
   if sn in ['05_年度YOY','06_BSR分层'] and isinstance(v,str) and c in [4,5] and len(v)>25:s.set_row(r-1,65)
-  if not isinstance(v,dict) and isinstance(v,str) and len(v)>70 and sn not in ['90_原始输入','91_去重明细']:s.set_row(r-1,65)
-  if sn in ['90_原始输入','91_去重明细'] and c==(6 if sn=='90_原始输入' else 7):
+  if not isinstance(v,dict) and isinstance(v,str) and len(v)>70 and sn not in ['90_原始输入','91_BSR候选明细']:s.set_row(r-1,65)
+  if sn in ['90_原始输入','91_BSR候选明细'] and c==(6 if sn=='90_原始输入' else 7):
    title=engine.get(sn,r,c) or '';s.set_row(r-1,min(150,max(30,math.ceil(len(str(title))/70)*14+6)))
  if sn=='08_2027规划与分析':
   s.write_blank('B3',None,wb.add_format({'bg_color':'#FEF3C7','font_color':'#2563EB','num_format':'0','border':1}));s.data_validation('B3',{'validate':'integer','criteria':'>=','value':0,'ignore_blank':True,'input_title':'目标新增链接数','input_message':'输入非负整数；空白不生成计划。'})
@@ -89,7 +91,7 @@ for sn in names:
    for bi in bis:
     start=1204+bi*50;chart.add_series({'name':['头部1—20','中部21—50','尾部51—100','1—5','6—10','11—20','21—50','51—100'][bi],'categories':['06_BSR分层',start,0,start+49,0],'values':['06_BSR分层',start,9,start+49,9]})
    chart.set_title({'name':'GENIMO BSR分层销量MOM'});chart.set_size({'width':780,'height':340});s.insert_chart(294+j*19,0,chart)
- if sn in ['90_原始输入','91_去重明细','92_聚合输入']:s.autofilter(3,0,max(r for r,c in sheets[sn])-1,len(info['headers'])-1)
+ if sn in ['90_原始输入','91_BSR候选明细','92_聚合输入']:s.autofilter(3,0,max(r for r,c in sheets[sn])-1,len(info['headers'])-1)
 wb.close();os.replace(staging,outfile)
 # Preserve evaluated ranges for visual review and perturbation without re-evaluating the baseline.
 with open(ROOT/'tmp/spec21_evaluated.jsonl','w',encoding='utf-8') as f:
@@ -100,6 +102,6 @@ with open(ROOT/'tmp/spec21_evaluated.jsonl','w',encoding='utf-8') as f:
   rs=sorted(widths)
   for r in rs:
    maxc=widths[r]
-   if r<=18 or sn not in ['90_原始输入','91_去重明细']:
+   if r<=18 or sn not in ['90_原始输入','91_BSR候选明细']:
     f.write(json.dumps({'row':r,'values':[engine.get(sn,r,c) for c in range(1,maxc+1)]},ensure_ascii=False)+'\n')
 print('EXPORTED '+str(outfile),flush=True)

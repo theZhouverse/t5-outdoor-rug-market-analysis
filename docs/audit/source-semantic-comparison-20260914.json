@@ -1,0 +1,13 @@
+{
+  "currentSha256": "62ffd074bca5299917d529bc033fdd01b9747ed6422d01177afb2b0c9b8a5701",
+  "previousSha256": "9ced3b100ece7d441b45ce8a1bd0eb9d3470854a832f071b02ecc2c6f91f5fac",
+  "comparison": "previous Git HEAD source versus current working-tree source",
+  "xmlStructureRowsCompared": 73811,
+  "rowKey": "month + sourceRow",
+  "rowKeyDifferences": 0,
+  "businessFields": ["ASIN", "父ASIN", "SKU", "品牌", "商品标题", "小类BSR", "月销量", "月销售额($)", "价格($)"],
+  "businessFieldDifferences": 0,
+  "parserBusinessRows": 73810,
+  "excludedTailNoteRows": 1,
+  "conclusion": "ZIP指纹发生变化，但逐月源行的业务字段没有变化；当前解析器继续排除1条非业务尾部说明行。"
+}

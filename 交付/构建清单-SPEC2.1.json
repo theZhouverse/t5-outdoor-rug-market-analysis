@@ -1,62 +1,68 @@
 {
   "specVersion": "2.1",
-  "sourceSha256": "9ced3b100ece7d441b45ce8a1bd0eb9d3470854a832f071b02ecc2c6f91f5fac",
-  "generatedAt": "2026-09-14T06:35:07.044Z",
-  "batchId": "spec21-9ced3b100ece",
+  "sourceSha256": "62ffd074bca5299917d529bc033fdd01b9747ed6422d01177afb2b0c9b8a5701",
+  "generatedAt": "2026-09-14T08:24:39.504Z",
+  "batchId": "spec21-62ffd074bca5",
   "latestMonth": "202607",
-  "analysisOrder": "BSR 1-100 inclusive -> parent ASIN dedup -> representative title/brand classification",
+  "analysisOrder": "BSR 1-100 inclusive -> retain every candidate source row (no parent ASIN dedup) -> row title/brand classification",
   "bsrCandidateRows": 9973,
-  "bsrCandidateParentRows": 5190,
-  "analysisPoolListingMonths": 5190,
+  "bsrCandidateParentRows": 1101,
+  "analysisPoolRows": 9973,
+  "analysisPoolListingMonths": 9973,
   "missingParentCandidateRows": 0,
-  "classificationRule": "representative title complete-word plastic; representative brand exact GENIMO",
-  "overallCompositionRule": "overall = PP + high-price complement",
+  "analysisUnit": "BSR-qualified source row identified by month/sourceRow; ASIN and parent ASIN are audit-only",
+  "parentAsinDedup": "not applied",
+  "classificationRule": "candidate-row title complete-word plastic; candidate-row brand exact GENIMO",
+  "overallCompositionRule": "overall = PP + high-price complement within BSR candidate rows",
   "files": [
     {
       "path": "交付/户外地垫市场分析报告-优化版.html",
-      "sha256": "8ae192ad00cf116797b21d86b61e62c76de1ee5bf7657864a5a4075b3ad7a78a",
-      "bytes": 1139936
+      "sha256": "57db683e4e79cb0104d7b89d67117df2813f9b38b7a80df750767dda71d4f358",
+      "bytes": 1301337
     },
     {
       "path": "交付/户外地垫市场分析数据.json",
-      "sha256": "5dd3d103773aadd2e3ad481b8bd7ae376ef814700776f52f46891587c212f102",
-      "bytes": 2701754
+      "sha256": "059235f1430095351c7f929a1c2c9f3f1db72cdec43e9d14440ff46f9bca288c",
+      "bytes": 3270108
     },
     {
       "path": "交付/户外地垫市场分析报告-优化版.md",
-      "sha256": "8e15da406ea8b6963694f80fafe33e534de05dbf6b5d82a7bc4ecd180a0799ee",
-      "bytes": 111384
+      "sha256": "6b3320920027ec13c7c1b02daf89bf7325dab4667df9909ee2892356b3bed5e8",
+      "bytes": 113568
     },
     {
       "path": "交付/户外地垫市场分析报告-极速版.md",
-      "sha256": "6c035e668c85818833e6490002b1eb849431896358472e9d0a7eea0e17fb9beb",
-      "bytes": 9355
+      "sha256": "6e5740ec9af8e59cb90ad55fb7ab9754ddb7c297b9f57b70893759de5cb7b706",
+      "bytes": 10026
     },
     {
-      "path": "outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-可回勾版.xlsx",
-      "sha256": "f5826048b7a0a552ab940951f60a0eb859d4824beabf2b71a5bb3833710963a1",
-      "bytes": 20085014
+      "path": "outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-候选行版.xlsx",
+      "sha256": "909ef0df8cec99cb67c0d6d670402a291b7f91e8620184add7a68dea96d4ec03",
+      "bytes": 22259769
     }
   ],
   "formulaAudit": {
     "engine": "SPEC2.1 explicit Excel subset evaluator (not desktop Excel)",
-    "formulaCount": 393073,
-    "independentExpectedComparisons": 345975,
+    "formulaCount": 557755,
+    "independentExpectedComparisons": 484682,
     "mismatches": [],
     "mismatchCount": 0,
     "metadata": {
       "specVersion": "2.1",
-      "sourceSha256": "9ced3b100ece7d441b45ce8a1bd0eb9d3470854a832f071b02ecc2c6f91f5fac",
-      "generatedAt": "2026-09-14T06:35:07.044Z",
-      "batchId": "spec21-9ced3b100ece",
+      "sourceSha256": "62ffd074bca5299917d529bc033fdd01b9747ed6422d01177afb2b0c9b8a5701",
+      "generatedAt": "2026-09-14T08:24:39.504Z",
+      "batchId": "spec21-62ffd074bca5",
       "latestMonth": "202607",
-      "analysisOrder": "BSR 1-100 inclusive -> parent ASIN dedup -> representative title/brand classification",
+      "analysisOrder": "BSR 1-100 inclusive -> retain every candidate source row (no parent ASIN dedup) -> row title/brand classification",
       "bsrCandidateRows": 9973,
-      "bsrCandidateParentRows": 5190,
-      "analysisPoolListingMonths": 5190,
+      "bsrCandidateParentRows": 1101,
+      "analysisPoolRows": 9973,
+      "analysisPoolListingMonths": 9973,
       "missingParentCandidateRows": 0,
-      "classificationRule": "representative title complete-word plastic; representative brand exact GENIMO",
-      "overallCompositionRule": "overall = PP + high-price complement"
+      "analysisUnit": "BSR-qualified source row identified by month/sourceRow; ASIN and parent ASIN are audit-only",
+      "parentAsinDedup": "not applied",
+      "classificationRule": "candidate-row title complete-word plastic; candidate-row brand exact GENIMO",
+      "overallCompositionRule": "overall = PP + high-price complement within BSR candidate rows"
     }
   }
 }

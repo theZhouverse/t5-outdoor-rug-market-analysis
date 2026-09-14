@@ -11,25 +11,18 @@ for line in open(ROOT/'tmp/formula_market_builder/workbook_plan.jsonl',encoding=
   for c,v in enumerate(x['values'],1):
    if v is not None:sheets[sn][(x['row'],c)]=v
 def eq(a,b):return a in [None,''] if b is None else isinstance(a,(int,float)) and math.isclose(a,b,rel_tol=1e-9,abs_tol=1e-6)
-def key(r):return r['parent'] or r['asin'] or 'source:'+r['month']+'#'+str(r['sourceRow'])
+def key(r):return 'source:'+r['month']+'#'+str(r['sourceRow'])
 def summarize(rs):
  def sm(k):vs=[r[k] for r in rs if isnum(r[k])];return sum(vs) if vs else None
  ps=[r['price'] for r in rs if isnum(r['price'])];paired=[r for r in rs if isnum(r['sales']) and isnum(r['revenue']) and r['sales']>0]
  return [len(rs),sm('sales'),sm('revenue'),sum(ps)/len(ps) if ps else None,sum(r['revenue'] for r in paired)/sum(r['sales'] for r in paired) if paired else None]
 def oracle(raw):
- g=collections.defaultdict(list)
- for r in raw:
-  if isnum(r['rank']) and 1<=r['rank']<=100 and r.get('parent'):
-   g[(r['month'],r['parent'])].append(r)
- full=[]
- for (m,k),rs in g.items():
-  r=min(rs,key=lambda x:(x['rank'] if isnum(x['rank']) and x['rank']>0 and x['rank']==int(x['rank']) else math.inf,-int(isnum(x['sales']))-int(isnum(x['revenue'])),-int(isnum(x['price'])),x['sourceRow'])).copy()
-  # Classification follows the selected representative row after BSR
-  # filtering, matching the production model.
-  r.update(plastic=r['plastic'],genimo=r['genimo']);full.append(r)
+ # The current rule is deliberately row-level: first filter BSR 1..100,
+ # then keep every candidate source row. Parent ASIN is never a grouping key.
+ full=[r.copy() for r in raw if isnum(r['rank']) and 1<=r['rank']<=100]
  pools={}
  for m in [D['months'][-1],str(int(D['months'][-1][:4])-1)+D['months'][-1][4:]]:
-  f=[r for r in full if r['month']==m];cand=sorted(f,key=lambda r:(r['rank'],r['parent'],r['sourceRow']));tp=cand
+  f=[r for r in full if r['month']==m];cand=sorted(f,key=lambda r:(r['rank'],key(r),r['sourceRow']));tp=cand
   for scope in ['overall','pp','nonpp','genimo','genimoPP']:
    def ok(r):return scope=='overall' or scope=='pp' and r['plastic'] or scope=='nonpp' and not r['plastic'] or scope=='genimo' and r['genimo'] or scope=='genimoPP' and r['genimo'] and r['plastic']
    pools[(scope,m,'full')]=[r for r in f if ok(r)];pools[(scope,m,'top')]=[r for r in (tp if scope.startswith('genimo') else cand) if ok(r)]
@@ -62,13 +55,12 @@ def verify(label,changes,plan_input=None):
  checks+=1
  for cell,v in originals.items():sheets['90_原始输入'][cell]=v
  results.append({'case':label,'changes':changes,'latestMetrics':readback,'allocations':allocations});print(label,'OK',en.count,flush=True)
-raw=D['raw'];rep=next(r for r in D['dedup'] if r['month']==latest and r['plastic'] and r['genimo'] and r['rank'] and r['rank']<100 and r['rawRows']>1)
-idx=next(i for i,r in enumerate(raw) if r['month']==latest and r['sourceRow']==rep['sourceRow']);members=[i for i,r in enumerate(raw) if r['month']==latest and key(r)==key(rep)];other=next(i for i in members if i!=idx)
+raw=D['raw'];idx=next(i for i,r in enumerate(raw) if r['month']==latest and isnum(r['rank']) and 1<=r['rank']<100);same_parent=[i for i,r in enumerate(raw) if r['month']==latest and r.get('parent')==raw[idx].get('parent') and i!=idx];other=same_parent[0] if same_parent else idx+1
 verify('基线',[])
 verify('销量金额标价联动',[(idx,'sales',raw[idx]['sales']+123),(idx,'revenue',raw[idx]['revenue']+4567),(idx,'price',raw[idx]['price']+7)])
-verify('BSR选择另一代表',[(other,'rank',1),(other,'sales',7654),(other,'revenue',456789),(other,'price',59)])
-verify('全家族越过BSR100边界',[(i,'rank',101) for i in members])
-verify('空值与真实零',[(i,'sales',None) for i in members]+[(i,'revenue',None) for i in members]+[(i,'price',0) for i in members])
+verify('单行移出BSR候选池',[(idx,'rank',101)])
+verify('同父ASIN其他行独立计入',[(other,'sales',raw[other]['sales']+7654),(other,'revenue',raw[other]['revenue']+456789),(other,'price',raw[other]['price']+59)])
+verify('单行空值与真实零',[(idx,'sales',None),(idx,'revenue',None),(idx,'price',0)])
 verify('恢复并输入23链接',[],23)
 verify('零链接输入',[],0)
 verify('恢复空输入',[])

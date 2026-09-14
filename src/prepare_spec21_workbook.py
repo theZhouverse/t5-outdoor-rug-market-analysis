@@ -20,17 +20,19 @@ def row(n,values): emit({'row':n,'values':values})
 def rate(a,b,v=UNSET,minus=True):return F(f'IF(AND(ISNUMBER({a}),ISNUMBER({b}),{b}>0),{a}/{b}'+('-1' if minus else '')+',"")',v)
 def total(refs,v=UNSET):return F('SUM('+','.join(refs)+')',v)
 def ratio(a,b):return a/b if finite(a) and finite(b) and b>0 else None
-meta=d['metadata']; names=['00_总览与校验','01_整体市场月度','02_PP市场月度','03_高客单价市场月度','04_GENIMO品牌月度','05_年度YOY','06_BSR分层','07_Top100组成与进退','08_2027规划与分析','90_原始输入','91_去重明细','92_聚合输入','93_数据校验','94_规则说明']
+meta=d['metadata']; names=['00_总览与校验','01_整体市场月度','02_PP市场月度','03_高客单价市场月度','04_GENIMO品牌月度','05_年度YOY','06_BSR分层','07_Top100组成与进退','08_2027规划与分析','90_原始输入','91_BSR候选明细','92_聚合输入','93_数据校验','94_规则说明']
 emit({'metadata':meta,'names':names})
+def analysis_key(r):
+ # No parent-ASIN or ASIN deduplication is applied in the current scope. Use
+ # the immutable source row identity so every candidate row stays separate.
+ return 'source:'+r['month']+'#'+str(r['sourceRow'])
 rawmap={}; rawbounds={}; members=collections.defaultdict(list)
 for i,r in enumerate(raw,5):
- m=r['month'];key=r.get('parent') or r.get('asin') or 'source:'+m+'#'+str(r['sourceRow'])
+ m=r['month'];key=analysis_key(r)
  rawmap[i]=r
- # Representative membership must be built from the BSR candidate rows,
- # after the numeric 1..100 filter.  Out-of-range source rows remain on the
- # raw audit sheet but cannot affect the business representative or its
- # PP/GENIMO classification.
- if finite(r.get('rank')) and 1 <= r['rank'] <= 100 and r.get('parent'):
+ # Every BSR-qualified source row is one business analysis unit.  Parent ASIN
+ # is not used to collapse rows; it remains available for audit only.
+ if finite(r.get('rank')) and 1 <= r['rank'] <= 100:
   members[(m,key)].append(i)
  rawbounds.setdefault(m,[i,i])[1]=i
 detmap={}; detbounds={}
@@ -39,13 +41,13 @@ def priority(r):return (r['rank'] if finite(r['rank']) else 10000000)*10000000+(
 assert max((r['rank'] or 0) for r in raw)<10000000
 assert max(r['sourceRow'] for r in raw)<10000
 sheet('90_原始输入','原始输入与可修订数值',['月份','源行号','ASIN','SKU','品牌','商品标题','父ASIN','原始小类BSR','数值BSR（可修订）','导入BSR状态','月销量','月销售额($)','价格($)','FBA原始','毛利率原始','Coupon原始','标题PP标记','品牌GENIMO标记','有效BSR≤100','来源子表','代表优先级分值'],
- '来源：地垫-卖家精灵市场数据.xlsx；SHA256 '+meta['sourceSha256']+'。I/K/L/M为数值输入；BSR候选先按1—100（含100）筛选。父ASIN是业务统计键，源ASIN仅作回勾；新增行、键或分类变化需重新导入。分值按BSR、销售完整度、价格完整度、数值源行排序。',{'F':60,'H':30,'T':18,'U':25})
+ '来源：地垫-卖家精灵市场数据.xlsx；SHA256 '+meta['sourceSha256']+'。I/K/L/M为数值输入；业务池先按1—100（含100）筛选并保留每条候选源行。父ASIN和ASIN仅作回勾和重复诊断，月份+源行号是行级Listing键；新增行、键或分类变化需重新导入。分值仅保留审计用途。',{'F':60,'H':30,'T':18,'U':25})
 for i,r in rawmap.items():
  vals=[r['month'],r['sourceRow'],r['asin'],r['sku'],r['brand'],r['title'],r['parent'],r['sourceBsr'],r['rank'],r['bsrStatus'],r['sales'],r['revenue'],r['price'],r['fba'],r['margin'],r['coupon'],int(r['plastic']),int(r['genimo'])]
  vals += [F(f'IF(AND(ISNUMBER(I{i}),I{i}>=1,I{i}<=100,I{i}=INT(I{i})),1,0)',int(finite(r['rank']) and r['rank']<=100)),r['sourceSheet'],F(f'IF(AND(ISNUMBER(I{i}),I{i}>0,I{i}=INT(I{i})),I{i},10000000)*10000000+(2-IF(ISNUMBER(K{i}),1,0)-IF(ISNUMBER(L{i}),1,0))*100000+IF(ISNUMBER(M{i}),0,10000)+B{i}',priority(r))]
  row(i,vals)
-sheet('91_去重明细','代表行与各池公式',['月份','Listing键','代表ASIN','父ASIN','SKU','品牌','代表标题','代表标题PP','代表品牌GENIMO','代表BSR','月销量','月销售额($)','价格($)','销量有效','销售额有效','价格有效','配对有效','BSR候选','成员数','来源子表','源行号','90代表行索引','整体候选序','整体入池','PP候选序','PP入池','高客单价候选序','高客单价入池','GENIMO候选序','GENIMO入池','配对销量','配对销售额','整体池内PP','整体池内高客单价','整体池内GENIMO','整体池内GENIMO PP','成员90行号','混合品牌组'],
- '仅包含通过BSR 1—100且有父ASIN的候选父ASIN组；V列按候选成员优先级选代表，H/I从代表行标题/品牌回勾，W—AJ均从90输入重算。',{'B':22,'G':60,'AK':50})
+sheet('91_BSR候选明细','BSR候选行与各池公式',['月份','Listing键','ASIN','父ASIN','SKU','品牌','商品标题','商品标题PP','品牌GENIMO','小类BSR','月销量','月销售额($)','价格($)','销量有效','销售额有效','价格有效','配对有效','BSR候选','候选行数','来源子表','源行号','90源行索引','整体候选序','整体入池','PP候选序','PP入池','高客单价候选序','高客单价入池','GENIMO候选序','GENIMO入池','配对销量','配对销售额','整体池内PP','整体池内高客单价','整体池内GENIMO','整体池内GENIMO PP','成员90行号','混合品牌组'],
+ '仅包含 BSR 1—100（含100）的候选源行；不按父ASIN折叠，V列直接回勾对应90源行，H/I从该行标题/品牌回勾，W—AJ均从90输入重算。',{'B':22,'G':60,'AK':50})
 topsets={k:set((r['month'],r['familyKey'].split('|',1)[1]) for r in v['topRows']) for k,v in cats.items()}
 for i,r in enumerate(detail,5):
  m=r['month'];key=r['familyKey'].split('|',1)[1]; ids=members[(m,key)];a,b=rawbounds[m];lo,hi=detbounds[m]; rid=next(j for j in ids if rawmap[j]['sourceRow']==r['sourceRow']); matched=min(ids,key=lambda j:priority(rawmap[j]));assert rid==matched
@@ -74,18 +76,18 @@ for scope,cat in cats.items():
   for level,band in levels:
    r=cat['monthly'][mi] if level=='全部' else cat['topMonthly'][mi] if level=='Top100' else (cat['tiers'] if band['key'] in cat['tiers'] else cat['fine'])[band['key']][mi]
    n=len(aggr)+5;aggmap[(scope,m,level)]=n;cache[(scope,m,level)]=r;aggr.append((scope,m,level,band,r))
-sheet('92_聚合输入','月度范围与层级公式汇总',['月份','范围键','范围','层级','Listing数','销量','销售额($)','价格合计($)','价格有效数','配对销量','配对销售额($)','销量有效数','销售额有效数','状态','平均标价($)','加权成交均价($)','候选去重数','截去数','原始候选行数'],
- '从91 BSR主池各月份有界范围COUNTIFS/SUMIFS计算。无有效数值留空，真实0保留。整体=PP+高客单价；头中尾和五档均从同一BSR主池分层。')
+sheet('92_聚合输入','月度范围与层级公式汇总',['月份','范围键','范围','层级','候选行数','销量','销售额($)','价格合计($)','价格有效数','配对销量','配对销售额($)','销量有效数','销售额有效数','状态','平均标价($)','加权成交均价($)','候选行数回勾','截去数','原始候选行数'],
+ '从91 BSR候选行各月份有界范围COUNTIFS/SUMIFS计算。无有效数值留空，真实0保留。整体=PP+高客单价；头中尾和五档均从同一BSR候选行池分层。')
 for n,(scope,m,level,band,z) in enumerate(aggr,5):
  lo,hi=detbounds[m]
  cond=[]
  # Every aggregation starts with Q/R's BSR candidate flag.  The remaining
- # conditions are representative-row classifications from 91, so an edited
- # BSR or representative input propagates through every scope.
+ # conditions are row-level title/brand classifications from 91, so an edited
+ # BSR or candidate input propagates through every scope.
  full={'overall':[('R',1)],'pp':[('R',1),('H',1)],'nonpp':[('R',1),('H',0)],'genimo':[('R',1),('I',1)],'genimoPP':[('R',1),('I',1),('H',1)],'genimoIndependent':[('R',1),('I',1)],'globalPP':[('R',1),('AG',1)],'globalHigh':[('R',1),('AH',1)]}
  tc={'overall':'X','pp':'Z','nonpp':'AB','genimo':'AI','genimoPP':'AJ','globalPP':'AG','globalHigh':'AH','genimoIndependent':'AD'}
  cond=full.get(scope,[]) if level=='全部' else [(tc[scope],1)]
- def crange(c):return f"'91_去重明细'!${c}${lo}:${c}${hi}"
+ def crange(c):return f"'91_BSR候选明细'!${c}${lo}:${c}${hi}"
  args=','.join(crange(c)+','+str(v) for c,v in cond)
  if band: args+=(',' if args else '')+crange('J')+',">='+str(band['lo'])+'",'+crange('J')+',"<='+str(band['hi'])+'"'
  if not args:args=crange('A')+',A'+str(n)
@@ -95,10 +97,10 @@ for n,(scope,m,level,band,z) in enumerate(aggr,5):
  candargs=[('R',1)]+full.get(scope,[])
  ca=','.join(crange(c)+','+str(v) for c,v in candargs)
  vals += [F('COUNTIFS('+ca+')') if level=='Top100' else None,F(f'MAX(0,Q{n}-E{n})') if level=='Top100' else None]
- # Source candidate counts use only rows that passed BSR 1..100 and have a
- # parent ASIN. Classification comes from the representative row in 91;
- # an out-of-range child title/brand cannot pull a parent into another pool.
- ids=[j for j,rr in rawmap.items() if level=='Top100' and rr['month']==m and finite(rr.get('rank')) and 1 <= rr['rank'] <= 100 and rr.get('parent') and ((scope=='overall') or (scope in ['pp','globalPP'] and detail[detmap[(m,rr.get('parent'))]-5]['plastic']) or (scope in ['nonpp','globalHigh'] and not detail[detmap[(m,rr.get('parent'))]-5]['plastic']) or (scope in ['genimo','genimoIndependent'] and detail[detmap[(m,rr.get('parent'))]-5]['genimo']) or (scope=='genimoPP' and detail[detmap[(m,rr.get('parent'))]-5]['genimo'] and detail[detmap[(m,rr.get('parent'))]-5]['plastic']))]
+ # Source candidate counts use every row that passed BSR 1..100, including
+ # rows without a parent ASIN. Classification is taken directly from that
+ # candidate row; no family representative or parent collapse is involved.
+ ids=[j for j,rr in rawmap.items() if level=='Top100' and rr['month']==m and finite(rr.get('rank')) and 1 <= rr['rank'] <= 100 and ((scope=='overall') or (scope in ['pp','globalPP'] and rr['plastic']) or (scope in ['nonpp','globalHigh'] and not rr['plastic']) or (scope in ['genimo','genimoIndependent'] and rr['genimo']) or (scope=='genimoPP' and rr['genimo'] and rr['plastic']))]
  refs=[ref('90_原始输入','S',j) for j in ids]
  while len(refs)>200:refs=['SUM('+','.join(refs[k:k+200])+')' for k in range(0,len(refs),200)]
  vals += [total(refs) if refs else None];row(n,vals)
@@ -121,16 +123,16 @@ def periodvals(scope,m,level):
  return v
 commonheaders=['月份','Listing数','销量','销售额($)','平均标价($)','加权成交均价($)','销量MOM','销售额MOM']
 for scope,name in [('overall',names[1]),('pp',names[2]),('nonpp',names[3])]:
- sheet(name,cats[scope]['title']+' 月度汇总',commonheaders+['销量有效数','销售额有效数','价格有效数','BSR主池Listing数','BSR主池销量','BSR主池销售额($)','BSR主池标价($)','BSR主池成交均价($)','BSR主池销量MOM','BSR主池销售额MOM','可比性','BSR候选原始行数','候选父ASIN数','截去数','BSR主池样本状态','去年同月Listing数','去年同月销量','去年同月销售额($)'],
- 'MOM=本月/去年同月−1；非自然月环比。空白=无样本/无有效值/无正数基期。整体=PP+高客单价；原始销量为源估算值。BSR主池已先筛1—100再按父ASIN去重。')
+ sheet(name,cats[scope]['title']+' 月度汇总',commonheaders+['销量有效数','销售额有效数','价格有效数','BSR候选行数','BSR候选销量','BSR候选销售额($)','BSR候选标价($)','BSR候选成交均价($)','BSR候选销量MOM','BSR候选销售额MOM','可比性','BSR候选原始行数','候选父ASIN数','截去数','BSR候选样本状态','去年同月候选行数','去年同月销量','去年同月销售额($)'],
+ 'MOM=本月/去年同月−1；非自然月环比。空白=无样本/无有效值/无正数基期。整体=PP+高客单价；原始销量为源估算值。业务池先筛1—100并保留每条候选行，不按父ASIN去重。')
  for n,m in enumerate(months,5):
   v=periodvals(scope,m,'全部');v += [link(scope,m,'全部',c) for c in ['L','M','I']];v+=periodvals(scope,m,'Top100')[1:];v +=[quality(scope,m,'全部')]+[link(scope,m,'Top100',c) for c in ['S','Q','R']]+[F(f'IF(L{n}<100,"少于100个样本",IF(L{n}>100,"超过100；并列或多小类","100个样本"))')]
   v +=[linkn(scope,py(m),'全部',c) if py(m) in months else None for c in ['E','F','G']];row(n,v)
-sheet(names[4],'GENIMO 品牌整体、PP和BSR主池表现',commonheaders+['销量份额','销售额份额','BSR主池Listing数','可比性'],
- 'GENIMO只从同一BSR 1—100、父ASIN去重主池筛选；整体份额分母整体主池，PP份额分母PP主池。所有MOM对去年同月。')
-for block,(scope,level,label,base) in enumerate([('genimo','全部','4.1 GENIMO整体表现（BSR主池）','overall'),('genimoPP','全部','4.2 GENIMO PP表现（BSR主池）','pp'),('genimo','Top100','4.4 GENIMO BSR主池表现','overall'),('genimoIndependent','Top100','4.4 GENIMO BSR主池回勾','overall')]):
+sheet(names[4],'GENIMO 品牌整体、PP和BSR候选行池表现',commonheaders+['销量份额','销售额份额','BSR候选行数','可比性'],
+ 'GENIMO只从同一BSR 1—100候选行池筛选；整体份额分母整体候选行池，PP份额分母PP候选行池。所有MOM对去年同月。')
+for block,(scope,level,label,base) in enumerate([('genimo','全部','4.1 GENIMO整体表现（BSR候选行池）','overall'),('genimoPP','全部','4.2 GENIMO PP表现（BSR候选行池）','pp'),('genimo','Top100','4.4 GENIMO BSR候选行池表现','overall'),('genimoIndependent','Top100','4.4 GENIMO BSR候选行池回勾','overall')]):
  start=5+block*(len(months)+4)
- if block:row(start-2,[label]);row(start-1,commonheaders+['销量份额','销售额份额','BSR主池Listing数','可比性'])
+ if block:row(start-2,[label]);row(start-1,commonheaders+['销量份额','销售额份额','BSR候选行数','可比性'])
  for n,m in enumerate(months,start):
   z=cache[(scope,m,level)];b=cache[(base,m,level)];v=periodvals(scope,m,level)+[rate(ar(scope,m,level,'F'),ar(base,m,level,'F'),ratio(z['sales'],b['sales']),False),rate(ar(scope,m,level,'G'),ar(base,m,level,'G'),ratio(z['revenue'],b['revenue']),False),link('genimoPP' if scope=='genimoPP' else 'genimo',m,'Top100','E','count'),quality(scope,m,level)];row(n,v)
 years=sorted(set(m[:4] for m in months))
@@ -149,8 +151,8 @@ for scope in ['overall','pp','nonpp','genimo','genimoPP']:
  for level in ['全部','Top100']:
   for y in years:
    v=annual_values(scope,level,y);v+=[F(f'IF(F{n}=0,"无样本",IF(OR(N{n}="",P{n}="",N{n}<=0,P{n}<=0),"无有效正数基期","同周期；检查样本可比性"))')];row(n,v);n+=1
-sheet(names[6],'BSR主池粗细档 月度与年度明细',['月份','范围','层级','BSR下限','BSR上限','Listing数','销量','销售额($)','平均标价($)','销量MOM','销售额MOM','可比性'],
- '粗档与细档均从同一BSR 1—100、父ASIN去重主池回勾；GENIMO使用该主池中的品牌代表行。月度之后接年度分层，按相邻年共同月份计算。')
+sheet(names[6],'BSR候选行池粗细档 月度与年度明细',['月份','范围','层级','BSR下限','BSR上限','候选行数','销量','销售额($)','平均标价($)','销量MOM','销售额MOM','可比性'],
+ '粗档与细档均从同一BSR 1—100候选行池回勾；不按父ASIN去重，GENIMO使用候选行品牌。月度之后接年度分层，按相邻年共同月份计算。')
 n=5
 for scope in ['overall','pp','nonpp','genimo']:
  for band in bands:
@@ -161,8 +163,8 @@ n+=3;row(n,annual_headers);n+=1
 for scope in ['overall','pp','nonpp','genimo']:
  for band in bands:
   for y in years:row(n,annual_values(scope,band['name'],y,band));n+=1
-sheet(names[7],'BSR主池组成与GENIMO进留退',['月份','整体数量','PP数量','高客单价数量','整体销量','PP销量','高客单价销量','整体金额','PP金额','高客单价金额','GENIMO当前数量','GENIMO基期数量','进入','保留','退出','基期月份'],
- '组成对同一BSR主池分区；整体=PP+高客单价。进入/保留/退出比较相邻自然月主池内GENIMO父ASIN集合，不代表上新或下架。详细Listing键见下方。')
+sheet(names[7],'BSR候选行池组成与GENIMO进留退',['月份','整体候选行数','PP候选行数','高客单价候选行数','整体销量','PP销量','高客单价销量','整体金额','PP金额','高客单价金额','GENIMO当前候选行数','GENIMO基期候选行数','进入','保留','退出','基期月份'],
+ '组成对同一BSR候选行池分区；整体=PP+高客单价。进入/保留/退出比较相邻自然月候选行池内GENIMO ASIN键集合，不代表上新或下架。详细Listing键见下方。')
 # Include all imported keys in either month so numerical BSR edits can change membership.
 move_rows=[];move_ranges={};n=5+len(months)+4
 for m in months:
@@ -178,9 +180,9 @@ for n,m in enumerate(months,5):
  v +=[F(f'COUNTIFS($D${lo}:$D${hi},"{state}")',move[field]) if move['available'] else None for state,field in [('进入','entered'),('保留','retained'),('退出','exited')]];v+=[move['previous']];row(n,v)
 row(5+len(months)+2,['月份','Listing键','基期月份','进留退','本期榜内','基期榜内','本期BSR','基期BSR'])
 for n,m,prev,key,cur,prior in move_rows:
- current=ref('91_去重明细','AI',cur) if cur else '0';before=ref('91_去重明细','AI',prior) if prior else '0'
+ current=ref('91_BSR候选明细','AI',cur) if cur else '0';before=ref('91_BSR候选明细','AI',prior) if prior else '0'
  state=F(f'IF(AND(E{n}=1,F{n}=1),"保留",IF(E{n}=1,"进入",IF(F{n}=1,"退出","未入榜")))') if prev in months else '无基期'
- row(n,[m,key,prev,state,F(current),F(before),guarded(ref('91_去重明细','J',cur)) if cur else None,guarded(ref('91_去重明细','J',prior)) if prior else None])
+ row(n,[m,key,prev,state,F(current),F(before),guarded(ref('91_BSR候选明细','J',cur)) if cur else None,guarded(ref('91_BSR候选明细','J',prior)) if prior else None])
 sheet(names[8],'2027链接规划与四部分分析',['层级','目标BSR','核心期销量','Listing月次','每Listing月次销量','销量权重','目标新增链接数','历史平均标价($)','动作与条件'],
  '建议情景，不是预测实绩。B3输入非负整数总链接数；默认空。按最近核心期GENIMO榜内层级销量权重分配，前两档向下取整，尾档取余。可比性受限先核验源。',{'I':85})
 row(3,['目标新增链接总数',None,'核心期',','.join(m for m in months if m.startswith(months[-1][:4]))])
@@ -207,12 +209,12 @@ for nr,scope,baseannual in [(32,'pp',5+len(years)*2+len(years)-1),(33,'nonpp',5+
  def brandshare(c,ms):return rate(brandrev(c),an(c,baseannual),minus=False) if scope=='pp' else F(f'IF(AND(({countdiff(ms)})>0,{an(c,baseannual)}>0),{brandrev(c)}/{an(c,baseannual)},"")')
  row(nr,[cats[scope]['title'],guarded(an('M',baseannual)),guarded(an('O',baseannual)),guarded(an('L',baseannual)),brandshare('O',ym),brandshare('P',pm),F(f'IF(AND(ISNUMBER(E{nr}),ISNUMBER(F{nr})),E{nr}-F{nr},"")'),quality(scope,months[-1],'全部'),'先核验样本；跟踪连续两个月金额、份额与BSR，再决定扩充。'])
 row(35,['优先核验/小测市场',F('IF(AND(ISNUMBER(D32),ISNUMBER(D33)),IF(D32>=D33,A32,A33),"证据不足")'),None,None,None,None,None,None,'依据：同周期销售额变化相对更强；保留PP现有品牌盘，先用实测验证，再分配链接。'])
-sheet(names[0],'户外地垫市场分析 SPEC 2.1',['项目','值','用途/边界','对应工作表'], '一份主源、一个BSR主池、四部分业务；先筛BSR 1—100再按父ASIN去重，整体=PP+高客单价，GENIMO是品牌视角。数值修订可在表内重算；结构变更重新导入。',{'A':28,'B':65,'C':75,'D':30})
-for n,v in enumerate([['版本','2.1','当前规范','94_规则说明'],['主源SHA256',meta['sourceSha256'],'核验原始文件未改','90_原始输入'],['批次',meta['batchId'],meta['generatedAt'],'所有交付文件'],['截止月份',months[-1],'未完整年度只比较共同月份','05_年度YOY'],['原始行数',F(f"COUNTA('90_原始输入'!A5:A{len(raw)+4})",len(raw)),'原始业务行','90_原始输入'],['BSR主池父ASIN月次',F(f"COUNTA('91_去重明细'!A5:A{len(detail)+4})",len(detail)),'BSR 1—100后父ASIN去重，唯一业务主池','91_去重明细'],['整体市场','01 / 05 / 06 / 07','BSR主池整体、分层、组成','01_整体市场月度'],['PP市场','02 / 05 / 06','代表标题命中plastic','02_PP市场月度'],['高客单价市场','03 / 05 / 06','PP补集，无额外价格门槛','03_高客单价市场月度'],['GENIMO','04 / 05 / 06 / 07 / 08','同一BSR主池的品牌份额、表现、进留退、2027计划','04_GENIMO品牌月度']],5):row(n,v)
+sheet(names[0],'户外地垫市场分析 SPEC 2.1',['项目','值','用途/边界','对应工作表'], '一份主源、一个BSR候选行池、四部分业务；先筛BSR 1—100后保留每条候选行，不按父ASIN去重，整体=PP+高客单价，GENIMO是品牌视角。数值修订可在表内重算；结构变更重新导入。',{'A':28,'B':65,'C':75,'D':30})
+for n,v in enumerate([['版本','2.1','当前规范','94_规则说明'],['主源SHA256',meta['sourceSha256'],'核验原始文件未改','90_原始输入'],['批次',meta['batchId'],meta['generatedAt'],'所有交付文件'],['截止月份',months[-1],'未完整年度只比较共同月份','05_年度YOY'],['原始行数',F(f"COUNTA('90_原始输入'!A5:A{len(raw)+4})",len(raw)),'原始业务行','90_原始输入'],['BSR候选行月次',F(f"COUNTA('91_BSR候选明细'!A5:A{len(detail)+4})",len(detail)),'BSR 1—100后保留每条候选源行，不按父ASIN去重','91_BSR候选明细'],['整体市场','01 / 05 / 06 / 07','BSR候选行池整体、分层、组成','01_整体市场月度'],['PP市场','02 / 05 / 06','候选行标题命中plastic','02_PP市场月度'],['高客单价市场','03 / 05 / 06','PP补集，无额外价格门槛','03_高客单价市场月度'],['GENIMO','04 / 05 / 06 / 07 / 08','同一BSR候选行池的品牌份额、表现、进留退、2027计划','04_GENIMO品牌月度']],5):row(n,v)
 sheet(names[12],'终端校验',['月份/项目','校验项','差额/结果','状态'], '只读观察，不给任何业务公式提供输入。数值比较差额，文本等值比较。')
 n=5
 row(n,['主源','原始业务行数',F(f"COUNTA('90_原始输入'!A5:A{len(raw)+4})-{len(raw)}",0),F('IF(C5=0,"通过","失败")','通过')]);n+=1
-row(n,['边界','BSR100存在',F(f'IF(COUNTIFS(\'91_去重明细\'!J5:J{len(detail)+4},100)>0,"通过","失败")','通过'),F('IF(C6="通过","通过","失败")','通过')]);n+=1
+row(n,['边界','BSR100存在',F(f'IF(COUNTIFS(\'91_BSR候选明细\'!J5:J{len(detail)+4},100)>0,"通过","失败")','通过'),F('IF(C6="通过","通过","失败")','通过')]);n+=1
 for m in months:
  for c,label in [('E','数量'),('F','销量'),('G','金额')]:
   for base,parts,pool in [('overall',['pp','nonpp'],'全部'),('overall',['globalPP','globalHigh'],'Top100')]:
@@ -225,7 +227,7 @@ for m in months:
   mr=months.index(m)+5
   if d['movements'][mr-5]['available']:
    row(n,[m,'GENIMO进留退回勾',F(f"'07_Top100组成与进退'!{lhs}{mr}-'07_Top100组成与进退'!{rhs}{mr}-'07_Top100组成与进退'!N{mr}",0),F(f'IF(C{n}=0,"通过","失败")','通过')]);n+=1
-sheet(names[13],'规则与人工复核',['规则项','说明'], '人工复核按90输入→91代表与入池→92聚合→01—08业务结果→93校验。',{'A':30,'B':130})
-rules=[('唯一主源','地垫-卖家精灵市场数据.xlsx；原文件只读。'),('分析顺序','原始行先筛BSR 1—100（含100），再按月份+父ASIN去重并选代表，之后按代表标题/品牌分类。'),('输入边界','90 I/K/L/M数字可改；新增/删除行、标题/品牌分类、父ASIN键、月份需重新导入。源ASIN仅作回勾，不作为缺失父ASIN时的业务统计键。'),('代表行','只在BSR候选父ASIN组内按最小有效BSR→销量/金额有效字段多→价格有效→数值源行最小。91 V定位90代表行。'),('PP分类','代表行标题匹配完整单词plastic；命中为PP，未命中为高客单价补集，不设置额外价格门槛。'),('整体市场','同一BSR主池中PP+高客单价；数量、销量、销售额逐月必须回加一致。'),('GENIMO','同一BSR主池按代表品牌精确匹配；GENIMO PP为GENIMO与PP交集。'),('BSR主池','符合1≤BSR≤100的候选全部保留，不再额外截取100；头中尾和五档均从该主池分层。'),('缺失与零','无样本/无有效值留空，真实0保留；增长率基期≤0不可用。'),('时间','月度MOM对去年同月；年度YOY对相邻年度共同月份，查看05 M—P分子分母。'),('均价','标价=有效价格总和/有效数；成交均价=销量>0且金额有效记录的金额合计/销量合计。'),('质量','样本比去年同月/上月变化>30%或销售字段覆盖<95%提示可比性受限；阈值为核验政策。'),('2027规划','08 B3默认空；输入非负整数按核心期GENIMO主池层级销量权重分配；前两档向下取整尾档取余。'),('源真实性','卖家精灵估算不等于真实成交；程序核验统计正确性，不能保证供应方估算真实性。'),('不计算利润','毛利率/FBA/Coupon仅保留原始证据，不进入分析/成本/利润推导。'),('文本与报告','HTML/JSON/Markdown为同批次静态报告，修改XLSX输入后需重新构建才同步外部文件。')]
+sheet(names[13],'规则与人工复核',['规则项','说明'], '人工复核按90输入→91候选行→92聚合→01—08业务结果→93校验。',{'A':30,'B':130})
+rules=[('唯一主源','地垫-卖家精灵市场数据.xlsx；原文件只读。'),('分析顺序','原始行先筛BSR 1—100（含100），保留每条候选源行，不按月份+父ASIN去重，之后按候选行标题/品牌分类。'),('输入边界','90 I/K/L/M数字可改；新增/删除行、标题/品牌分类、父ASIN键、月份需重新导入。父ASIN只作审计字段，ASIN和源行号用于回勾。'),('分析单位','每条满足1≤BSR≤100的源行是一个Listing候选月次；同一父ASIN下的多个子体行分别计入，不能把重复行合并。'),('PP分类','候选行商品标题匹配完整单词plastic；命中为PP，未命中为高客单价补集，不设置额外价格门槛。'),('整体市场','同一BSR候选行池中PP+高客单价；数量、销量、销售额逐月必须回加一致。'),('GENIMO','同一BSR候选行池按候选行品牌精确匹配；GENIMO PP为品牌与PP交集。'),('BSR候选行池','符合1≤BSR≤100的候选全部保留，不再额外截取100或去重；头中尾和五档均从该池分层。'),('缺失与零','无样本/无有效值留空，真实0保留；增长率基期≤0不可用。'),('时间','月度MOM对去年同月；年度YOY对相邻年度共同月份，查看05 M—P分子分母。'),('均价','标价=有效价格总和/有效数；成交均价=销量>0且金额有效记录的金额合计/销量合计。'),('质量','样本比去年同月/上月变化>30%或销售字段覆盖<95%提示可比性受限；阈值为核验政策。'),('2027规划','08 B3默认空；输入非负整数按核心期GENIMO候选行池层级销量权重分配；前两档向下取整尾档取余。'),('源真实性','卖家精灵估算不等于真实成交；程序核验统计正确性，不能保证供应方估算真实性。'),('不计算利润','毛利率/FBA/Coupon仅保留原始证据，不进入分析/成本/利润推导。'),('文本与报告','HTML/JSON/Markdown为同批次静态报告，修改XLSX输入后需重新构建才同步外部文件。')]
 for n,v in enumerate(rules,5):row(n,list(v))
 out.close();print(json.dumps({'rows':len(raw),'detail':len(detail),'aggregate':len(aggr),'plan':str(ROOT/'tmp/formula_market_builder/workbook_plan.jsonl')},ensure_ascii=False))

@@ -9,9 +9,10 @@ assert.equal(annualRows(['202401','202601'],[{month:'202401',sales:10,revenue:20
 const rs=annualRows(['202401','202403','202501','202502','202503'],[{month:'202401',sales:10,revenue:20,price:2},{month:'202403',sales:10,revenue:20,price:2},{month:'202501',sales:20,revenue:40,price:2},{month:'202502',sales:999,revenue:999,price:2},{month:'202503',sales:20,revenue:40,price:2}]);assert.equal(rs[1].yoySales,1);assert.deepEqual(rs[1].commonMonths,['01','03']);
 const d=JSON.parse(fs.readFileSync('tmp/formula_market_builder/spec2_dataset.json','utf8'));
 assert.equal(d.raw.length,73810);assert.equal(d.months.length,50);assert.equal(new Set(d.months).size,50);
-assert.equal(d.mainPool.length,5190);
+assert.equal(d.mainPool.length,9973);
 assert.equal(d.dedup.length,d.mainPool.length);
-assert.ok(d.dedup.every(r=>Number.isInteger(r.rank)&&r.rank>=1&&r.rank<=100&&r.parent),'business pool must be BSR-filtered parent ASIN rows');
+assert.ok(d.dedup.every(r=>Number.isInteger(r.rank)&&r.rank>=1&&r.rank<=100),'business pool must retain every BSR-qualified source row');
+assert.equal(d.dedup.filter(r=>!r.parent).length,0,'source currently has no missing-parent candidate rows, but parent is not required by the rule');
 for(const month of d.months){
   const sets=Object.fromEntries(['overall','pp','nonpp','genimo','genimoPP'].map(scope=>[scope,new Set(d.categories[scope].topRows.filter(r=>r.month===month).map(r=>r.familyKey))]));
   assert.equal(sets.overall.size,sets.pp.size+sets.nonpp.size,month+' PP/high complement');
@@ -19,7 +20,7 @@ for(const month of d.months){
   for(const key of sets.nonpp)assert.ok(sets.overall.has(key)&&!sets.pp.has(key),month+' high subset');
   for(const key of sets.genimoPP)assert.ok(sets.genimo.has(key)&&sets.pp.has(key),month+' GENIMO PP intersection');
 }
-assert.equal(d.categories.genimo.topMonthly.find(r=>r.month==='202505').count,7);assert.equal(d.categories.genimoIndependent.topMonthly.find(r=>r.month==='202505').count,7);
+assert.equal(d.categories.genimo.topMonthly.find(r=>r.month==='202505').count,8);assert.equal(d.categories.genimoIndependent.topMonthly.find(r=>r.month==='202505').count,8);
 for(const mv of d.movements)if(mv.available){assert.equal(mv.current,mv.entered+mv.retained);assert.equal(mv.prior,mv.exited+mv.retained);}
 for(const [scope,cat] of Object.entries(d.categories))for(const r of cat.monthly){assert.ok(r.count||r.sales===null);if(r.count===0)assert.equal(r.revenue,null);}
 console.log('SPEC21_MODEL_BOUNDARIES_OK');

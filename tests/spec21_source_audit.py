@@ -59,15 +59,12 @@ for r in raw:
   checks+=1
   if e[k]!=v:errors.append([r['month'],r['sourceRow'],k,v,e[k]])
 assert len(raw)==len(expected)
-candidate_raw=[r for r in raw if r['rank'] is not None and 1 <= r['rank'] <= 100 and r['parent']]
-groups=collections.defaultdict(list)
-for r in candidate_raw:groups[(r['month'],r['parent'])].append(r)
+candidate_raw=[r for r in raw if r['rank'] is not None and 1 <= r['rank'] <= 100]
+# Current scope is row-level after the BSR filter. Keep every candidate source
+# row; parent ASIN is retained only as an audit field.
 reps=[]
-for key,rs in groups.items():
- rep=min(rs,key=lambda r:(r['rank'] if r['rank'] is not None else math.inf,-sum(r[k] is not None for k in ['sales','revenue']),-(r['price'] is not None),r['sourceRow'])).copy()
- # Classification follows the representative row selected from the
- # already-filtered candidate group, not any out-of-range family member.
- rep.update(plastic=rep['plastic'],genimo=rep['genimo'],key=key[1]);reps.append(rep)
+for r in candidate_raw:
+ rep=r.copy();rep['key']=rep.get('asin') or rep.get('parent') or f"source:{rep['month']}#{rep['sourceRow']}";reps.append(rep)
 def metrics(rs):
  def sm(k):vs=[r[k] for r in rs if r[k] is not None];return sum(vs) if vs else None
  p=[r for r in rs if r['sales'] is not None and r['sales']>0 and r['revenue'] is not None];prices=[r['price'] for r in rs if r['price'] is not None]
