@@ -1,5 +1,11 @@
 {
   "specVersion": "2.1",
+  "scopeStatus": "docs_updated_rebuild_required",
+  "confirmedAnalysisOrder": ["filter BSR 1-100 inclusive", "deduplicate by parent ASIN", "split PP and high-price complement", "overall equals PP plus high-price", "filter GENIMO from the same pool"],
+  "previousWorkbookScope": "full_dedup_overall_plus_separate_bsr_pool",
+  "previousClassificationScope": "family_any_member_title_plastic",
+  "confirmedClassificationScope": "representative_title_plastic_after_bsr_parent_dedup",
+  "classificationDifferencesInCurrentCandidatePool": 8,
   "sourceSha256": "9ced3b100ece7d441b45ce8a1bd0eb9d3470854a832f071b02ecc2c6f91f5fac",
   "sourceRows": 73810,
   "listingMonthRows": 63554,
@@ -15,7 +21,11 @@
   "html": {"navGroups": 5, "collapsibleSubsections": 31, "interactiveCharts": 26, "browserErrors": []},
   "nativeExcelFullRecalculation": "not_run",
   "latestMonth": "202607",
-  "latestOverall": {"listingMonth": 407, "sales": 333653, "revenue": 17049975, "top100Listing": 111},
-  "latestGenimoPP": {"listingMonth": 5, "sales": 43691, "revenue": 1047486},
+  "currentResults": null,
+  "currentResultsNote": "旧口径结果已作废；待按BSR筛选→父ASIN去重→分类的新主池重建后填入。",
+  "previousScopeResults": {
+    "latestOverall": {"listingMonth": 407, "sales": 333653, "revenue": 17049975, "top100Listing": 111},
+    "latestGenimoPP": {"listingMonth": 5, "sales": 43691, "revenue": 1047486}
+  },
   "regression202509": {"bsrCandidateRows": 114, "dedupListings": 96, "titlePlasticRows": 65}
 }
