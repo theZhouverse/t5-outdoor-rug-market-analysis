@@ -18,13 +18,18 @@ def summarize(rs):
  return [len(rs),sm('sales'),sm('revenue'),sum(ps)/len(ps) if ps else None,sum(r['revenue'] for r in paired)/sum(r['sales'] for r in paired) if paired else None]
 def oracle(raw):
  g=collections.defaultdict(list)
- for r in raw:g[(r['month'],key(r))].append(r)
+ for r in raw:
+  if isnum(r['rank']) and 1<=r['rank']<=100 and r.get('parent'):
+   g[(r['month'],r['parent'])].append(r)
  full=[]
  for (m,k),rs in g.items():
-  r=min(rs,key=lambda x:(x['rank'] if isnum(x['rank']) and x['rank']>0 and x['rank']==int(x['rank']) else math.inf,-int(isnum(x['sales']))-int(isnum(x['revenue'])),-int(isnum(x['price'])),x['sourceRow'])).copy();r.update(plastic=any(x['plastic'] for x in rs),genimo=any(x['genimo'] for x in rs));full.append(r)
+  r=min(rs,key=lambda x:(x['rank'] if isnum(x['rank']) and x['rank']>0 and x['rank']==int(x['rank']) else math.inf,-int(isnum(x['sales']))-int(isnum(x['revenue'])),-int(isnum(x['price'])),x['sourceRow'])).copy()
+  # Classification follows the selected representative row after BSR
+  # filtering, matching the production model.
+  r.update(plastic=r['plastic'],genimo=r['genimo']);full.append(r)
  pools={}
  for m in [D['months'][-1],str(int(D['months'][-1][:4])-1)+D['months'][-1][4:]]:
-  f=[r for r in full if r['month']==m];cand=sorted([r for r in f if isnum(r['rank']) and 1<=r['rank']<=100 and r['rank']==int(r['rank'])],key=lambda r:(r['rank'],key(r),r['sourceRow']));tp=cand
+  f=[r for r in full if r['month']==m];cand=sorted(f,key=lambda r:(r['rank'],r['parent'],r['sourceRow']));tp=cand
   for scope in ['overall','pp','nonpp','genimo','genimoPP']:
    def ok(r):return scope=='overall' or scope=='pp' and r['plastic'] or scope=='nonpp' and not r['plastic'] or scope=='genimo' and r['genimo'] or scope=='genimoPP' and r['genimo'] and r['plastic']
    pools[(scope,m,'full')]=[r for r in f if ok(r)];pools[(scope,m,'top')]=[r for r in (tp if scope.startswith('genimo') else cand) if ok(r)]

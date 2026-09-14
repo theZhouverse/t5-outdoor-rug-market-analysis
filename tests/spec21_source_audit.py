@@ -59,22 +59,25 @@ for r in raw:
   checks+=1
   if e[k]!=v:errors.append([r['month'],r['sourceRow'],k,v,e[k]])
 assert len(raw)==len(expected)
+candidate_raw=[r for r in raw if r['rank'] is not None and 1 <= r['rank'] <= 100 and r['parent']]
 groups=collections.defaultdict(list)
-for r in raw:groups[(r['month'],r['parent'] or r['asin'] or 'source:'+r['month']+'#'+str(r['sourceRow']))].append(r)
+for r in candidate_raw:groups[(r['month'],r['parent'])].append(r)
 reps=[]
 for key,rs in groups.items():
  rep=min(rs,key=lambda r:(r['rank'] if r['rank'] is not None else math.inf,-sum(r[k] is not None for k in ['sales','revenue']),-(r['price'] is not None),r['sourceRow'])).copy()
- rep.update(plastic=any(r['plastic'] for r in rs),genimo=any(r['genimo'] for r in rs),key=key[1]);reps.append(rep)
+ # Classification follows the representative row selected from the
+ # already-filtered candidate group, not any out-of-range family member.
+ rep.update(plastic=rep['plastic'],genimo=rep['genimo'],key=key[1]);reps.append(rep)
 def metrics(rs):
  def sm(k):vs=[r[k] for r in rs if r[k] is not None];return sum(vs) if vs else None
  p=[r for r in rs if r['sales'] is not None and r['sales']>0 and r['revenue'] is not None];prices=[r['price'] for r in rs if r['price'] is not None]
  return dict(count=len(rs),sales=sm('sales'),revenue=sm('revenue'),avgPrice=sum(prices)/len(prices) if prices else None,pairedAsp=sum(r['revenue'] for r in p)/sum(r['sales'] for r in p) if p else None)
 def same(a,b):return a is b if a is None or b is None else math.isclose(a,b,abs_tol=1e-6,rel_tol=1e-10)
 for m in D['months']:
- full=[r for r in reps if r['month']==m];candidates=sorted([r for r in full if r['rank'] is not None and r['rank']<=100],key=lambda r:(r['rank'],r['key'],r['sourceRow']));top=candidates
+ full=[r for r in reps if r['month']==m];candidates=sorted(full,key=lambda r:(r['rank'],r['key'],r['sourceRow']));top=candidates
  for scope in ['overall','pp','nonpp','genimo','genimoPP']:
   def eligible(r):return scope=='overall' or scope=='pp' and r['plastic'] or scope=='nonpp' and not r['plastic'] or scope=='genimo' and r['genimo'] or scope=='genimoPP' and r['genimo'] and r['plastic']
-  pool=[r for r in full if eligible(r)];tp=[r for r in (top if scope.startswith('genimo') else candidates) if eligible(r)]
+  pool=[r for r in full if eligible(r)];tp=[r for r in candidates if eligible(r)]
   for kind,rs in [('monthly',pool),('topMonthly',tp)]:
    a=metrics(rs);e=next(r for r in D['categories'][scope][kind] if r['month']==m)
    for k,v in a.items():

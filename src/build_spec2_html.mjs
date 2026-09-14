@@ -226,18 +226,6 @@ function readRawRows() {
   return { rows: allRows, sheetStats };
 }
 
-function buildFamilyFlags(rows) {
-  const flags = new Map();
-  for (const row of rows) {
-    const key = row.month + '|' + listingKey(row);
-    const current = flags.get(key) || { plastic: false, genimo: false };
-    current.plastic = current.plastic || isPlasticTitle(row.title);
-    current.genimo = current.genimo || isGenimo(row.brand);
-    flags.set(key, current);
-  }
-  return flags;
-}
-
 function representativeCompare(a, b) {
   const ar = a.rank === null ? Number.POSITIVE_INFINITY : a.rank;
   const br = b.rank === null ? Number.POSITIVE_INFINITY : b.rank;
@@ -249,9 +237,18 @@ function representativeCompare(a, b) {
   return a.sourceRow - b.sourceRow;
 }
 
-function dedup(rows, flags) {
+/**
+ * Build the business analysis pool.  The order is deliberate and is part of
+ * the data contract: BSR 1..100 is applied to source rows first, then rows
+ * are grouped by parent ASIN within a month, and only then is the
+ * representative row's title/brand used for classification.  A missing
+ * parent ASIN is not silently replaced by ASIN/source-row for business
+ * statistics; those rows remain available in the raw input audit only.
+ */
+function dedup(rows) {
   const groups = new Map();
   for (const row of rows) {
+    if (!row.parent) continue;
     const key = row.month + '|' + listingKey(row);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
@@ -259,12 +256,13 @@ function dedup(rows, flags) {
   const result = [];
   for (const [key, items] of groups.entries()) {
     const rep = items.slice().sort(representativeCompare)[0];
-    const family = flags.get(key) || { plastic: false, genimo: false };
     result.push({
       ...rep,
       familyKey: key,
-      plastic: family.plastic,
-      genimo: family.genimo,
+      // Classification is intentionally based on the representative row
+      // selected from the already BSR-filtered candidate group.
+      plastic: isPlasticTitle(rep.title),
+      genimo: isGenimo(rep.brand),
       rawRows: items.length,
       sourceRows: items.map(sourceId)
     });
@@ -600,7 +598,7 @@ function trendTable(data, topData, candidateData) {
     fmt(r.count-r.missingSales),fmt(r.count-r.missingRevenue),fmt(r.count-r.missingPrice),
     fmt(r.comparisonCount),r.quality
   ]);
-  return table(['月份', '整体商品数（去重Listing）', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', 'BSR前100原始候选行数', 'BSR前100去重Listing数','销量有效数','金额有效数','价格有效数','去年同月Listing数','可比性'], rows);
+  return table(['月份', 'BSR主池父ASIN数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', 'BSR候选原始行数', '候选父ASIN数','销量有效数','金额有效数','价格有效数','去年同月父ASIN数','可比性'], rows);
 }
 
 function topTrendTable(data, candidateData) {
@@ -615,7 +613,7 @@ function topTrendTable(data, candidateData) {
     fmtPct(r.momRevenue),
     fmt(candidateData[i] ? candidateData[i].rawCount : null),fmt(candidateData[i]?.count),fmt(candidateData[i] ? Math.max(0,candidateData[i].count-r.count) : null),r.count<100?'少于100个样本':r.count>100?'超过100；并列或多小类':'100个样本',r.quality
   ]);
-  return table(['月份', 'Top100去重Listing数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', '原始候选行数','候选去重数','候选未入数（应为0）','样本状态','可比性'], rows);
+  return table(['月份', 'BSR主池父ASIN数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', '候选原始行数','候选父ASIN数','重复候选行数','样本状态','可比性'], rows);
 }
 
 function annualTable(data, topData, prefix = '整体') {
@@ -636,7 +634,7 @@ function annualTable(data, topData, prefix = '整体') {
       fmtPct(top.yoyRevenue),r.coverage,r.yoyPeriod || '无共同基期',fmt(r.currentComparable?.sales),fmt(r.previousComparable?.sales),fmt(r.currentComparable?.revenue,2),fmt(r.previousComparable?.revenue,2)
     ];
   });
-  return table(['年份', prefix + 'Listing月次', prefix + '销量', prefix + '销售额($)', prefix + '平均标价($)', prefix + '销量YOY', prefix + '销售额YOY', 'Top100 Listing月次', 'Top100销量', 'Top100销售额($)', 'Top100销量YOY', 'Top100销售额YOY','本期覆盖月份','YOY比较期间','同比本期销量','同比基期销量','同比本期金额($)','同比基期金额($)'], rows);
+  return table(['年份', prefix + 'BSR主池Listing月次', prefix + '销量', prefix + '销售额($)', prefix + '平均标价($)', prefix + '销量YOY', prefix + '销售额YOY', 'BSR主池Listing月次（回勾）', 'BSR主池销量（回勾）', 'BSR主池销售额($)（回勾）', 'BSR主池销量YOY', 'BSR主池销售额YOY','本期覆盖月份','YOY比较期间','同比本期销量','同比基期销量','同比本期金额($)','同比基期金额($)'], rows);
 }
 
 function tierTable(data, title) {
@@ -655,9 +653,9 @@ function narrative(category, overall, pp, nonpp) {
   const latest = lastNonEmpty(category.monthly);
   const top = category.topMonthly.find((r) => r.month === latest.month) || {};
   const pieces = [];
-  pieces.push('截至 ' + latest.month.slice(0, 4) + '.' + Number(latest.month.slice(4, 6)) + '，' + category.title + '整体盘共有 ' + fmt(latest.count) + ' 个去重 Listing，销量 ' + fmt(latest.sales) + '，销售额 $' + fmt(latest.revenue, 2) + '，平均标价 $' + fmt(latest.avgPrice, 2) + '。');
+  pieces.push('截至 ' + latest.month.slice(0, 4) + '.' + Number(latest.month.slice(4, 6)) + '，' + category.title + '的BSR主池共有 ' + fmt(latest.count) + ' 个去重父ASIN月次，销量 ' + fmt(latest.sales) + '，销售额 $' + fmt(latest.revenue, 2) + '，平均标价 $' + fmt(latest.avgPrice, 2) + '。');
   pieces.push('与去年同月相比（MOM），销量' + (latest.momSales === null ? '缺少可比月份' : (latest.momSales >= 0 ? '增长 ' : '下降 ') + fmtPct(Math.abs(latest.momSales))) + '，销售额' + (latest.momRevenue === null ? '缺少可比月份' : (latest.momRevenue >= 0 ? '增长 ' : '下降 ') + fmtPct(Math.abs(latest.momRevenue)) ) + '。');
-  pieces.push('BSR 1—100（包含100）在该月覆盖 ' + fmt(top.count) + ' 个 Listing，销量 ' + fmt(top.sales) + '，销售额 $' + fmt(top.revenue, 2) + '；Top100与整体盘的差异用于判断头部集中度。');
+  pieces.push('该主池由原始行先筛 BSR 1—100（包含100），再按父ASIN去重；本月保留 ' + fmt(top.count) + ' 个父ASIN，候选原始行 ' + fmt(category.topCandidateMonthly.find((r) => r.month === latest.month)?.rawCount) + ' 行。');
   if (category.title === '整体市场') {
     const p = lastNonEmpty(pp.monthly);
     const n = lastNonEmpty(nonpp.monthly);
@@ -665,7 +663,7 @@ function narrative(category, overall, pp, nonpp) {
   }
   pieces.push('原始销量覆盖率 ' + fmtPct(latest.salesCoverage) + '，销售额覆盖率 ' + fmtPct(latest.revenueCoverage) + '；空值保留为空，不把缺失当作零。');
   pieces.push('可比性：'+latest.quality+'；本月 '+fmt(latest.count)+' 个Listing，去年同月 '+fmt(latest.comparisonCount)+' 个。样本变化超过30%或销售字段覆盖不足95%会提示复核，阈值是审查政策，不是市场事实。');
-  pieces.push('配对成交均价 $'+fmt(latest.pairedAsp,2)+'，去年同月变化 '+fmtPct(latest.momPairedAsp)+'；该价格来自同月有有效销量及金额的样本，不能据此认定同款涨价。Top100销量占整体盘 '+fmtPct(Number.isFinite(top.sales)&&latest.sales>0?top.sales/latest.sales:null)+'。');
+  pieces.push('配对成交均价 $'+fmt(latest.pairedAsp,2)+'，去年同月变化 '+fmtPct(latest.momPairedAsp)+'；该价格来自同月有有效销量及金额的样本，不能据此认定同款涨价。');
   const year=category.annual.at(-1);
   pieces.push('最近年度共同周期 '+(year.yoyPeriod || '无共同基期')+'：销量 '+fmt(year.previousComparable?.sales)+' → '+fmt(year.currentComparable?.sales)+'（'+fmtPct(year.yoySales)+'）；金额 $'+fmt(year.previousComparable?.revenue,2)+' → $'+fmt(year.currentComparable?.revenue,2)+'（'+fmtPct(year.yoyRevenue)+'）。未完结年度不与去年全年直接比较。');
   const efficiencies=BANDS.map(b=>{const x=category.annualBands[b.key].at(-1);return {b,x,eff:x.count>0&&Number.isFinite(x.sales)?x.sales/x.count:null};});
@@ -681,7 +679,7 @@ function annualBandTable(category){
 }
 
 function compositionTable(category){
-  return '<h4>整体Top100内部组成（同一主池，可相加）</h4>'+table(['月份','整体数量','榜内PP数量','榜内高客单价数量','整体销量','榜内PP销量','榜内高客单价销量','整体金额($)','榜内PP金额($)','榜内高客单价金额($)'],category.composition.map(r=>[r.month,...['count','sales','revenue'].flatMap(k=>['overall','pp','high'].map(s=>fmt(r[s][k],k==='revenue'?2:0)))]));
+  return '<h4>BSR主池市场组成（PP + 高客单价 = 整体）</h4>'+table(['月份','整体父ASIN数','PP父ASIN数','高客单价父ASIN数','整体销量','PP销量','高客单价销量','整体金额($)','PP金额($)','高客单价金额($)'],category.composition.map(r=>[r.month,...['count','sales','revenue'].flatMap(k=>['overall','pp','high'].map(s=>fmt(r[s][k],k==='revenue'?2:0)))]));
 }
 
 function marketSection(id, number, category, overall, pp, nonpp) {
@@ -699,24 +697,24 @@ function marketSection(id, number, category, overall, pp, nonpp) {
     return row;
   });
   let out = '<section id="' + id + '"><h2>' + number + '｜' + esc(category.title) + '</h2>';
-  out += '<p class="lead">本部分按“整体盘 → BSR Top100 → 头部/中部/尾部 → 五档 → 文字分析”展开。月度 MOM 为本月与去年同月比较，年度 YOY 为本年与上一年度比较。</p>';
+  out += '<p class="lead">本部分按“BSR主池月度 → 年度YOY → 趋势图 → 头部/中部/尾部与五档 → 文字分析”展开。主池先筛 BSR 1—100（含100），再按父ASIN去重；月度 MOM 为本月与去年同月比较，年度 YOY 为本年与上一年度共同月份比较。</p>';
   out += '<p class="scope-notice">最新月：'+esc(latest.quality)+'。这是一份原始导出样本的分析；样本变化可能影响增长率，表格保留两期数量与覆盖率。</p>';
   out += '<div class="cards"><div class="card"><b>最新月整体销量</b><strong>' + fmt(latest.sales) + '</strong><small>' + esc(latest.month) + '</small></div>';
   out += '<div class="card"><b>最新月整体销售额</b><strong>$' + fmt(latest.revenue, 2) + '</strong><small>原始月销售额合计</small></div>';
-  out += '<div class="card"><b>最新月 Top100 销量</b><strong>' + fmt(topLatest.sales) + '</strong><small>' + fmt(topLatest.count) + ' 个 Listing</small></div>';
+  out += '<div class="card"><b>最新月 BSR主池销量</b><strong>' + fmt(topLatest.sales) + '</strong><small>' + fmt(topLatest.count) + ' 个父ASIN</small></div>';
   out += '<div class="card"><b>最新月平均标价</b><strong>$' + fmt(latest.avgPrice, 2) + '</strong><small>按有价格记录算术平均</small></div></div>';
   out += subsection(id + '-1-1', sectionNo + '.1 月度汇总与可回勾数据', trendTable(category.monthly, category.topMonthly, category.topCandidateMonthly));
-  out += subsection(id + '-1-2', sectionNo + '.2 BSR Top100 月度明细', topTrendTable(category.topMonthly, category.topCandidateMonthly)+(category.composition?compositionTable(category):''));
+  out += subsection(id + '-1-2', sectionNo + '.2 BSR主池月度明细', topTrendTable(category.topMonthly, category.topCandidateMonthly)+(category.composition?compositionTable(category):''));
   out += subsection(id + '-1-3', sectionNo + '.3 年度 YOY 汇总', annualTable(category.annual, category.topAnnual));
   let charts = '<div class="charts">' + svgBarChart(category.title + '月销量', category.monthly, 'sales', '#2563eb', 0);
   charts += svgBarChart(category.title + '月销售额', category.monthly, 'revenue', '#0f766e', 2);
   charts += svgLineChart(category.title + '平均标价趋势', category.monthly, [{ name: '平均标价($)', field: 'avgPrice', color: '#7c3aed' }]);
   charts += svgLineChart(category.title + '销量MOM（去年同月）', category.monthly, [{ name: '销量MOM', field: 'momSales', color: '#2563eb' }], true) + '</div>';
   out += subsection(id + '-1-4', sectionNo + '.4 市场趋势图', charts);
-  let rankCharts = '<p>Top100 先按可解析的小类BSR筛选 1—100（含100），再按父ASIN优先、否则ASIN去重；五档互斥为 1-5、6-10、11-20、21-50、51-100。MOM统一比较去年同月。</p><div class="charts">';
-  rankCharts += svgLineChart(category.title + ' Top100 五档销量MOM', fineCombined, FINE_BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#1d4ed8', '#0891b2', '#059669', '#f59e0b', '#dc2626'][i] })), true);
-  rankCharts += svgLineChart(category.title + ' Top100 头/中/尾销量MOM', tierCombined, BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#2563eb', '#059669', '#f97316'][i] })), true) + '</div>';
-  out += subsection(id + '-1-5', sectionNo + '.5 BSR Top100 五档与头中尾 MOM', rankCharts);
+  let rankCharts = '<p>BSR主池先按可解析的小类BSR筛选 1—100（含100），再按父ASIN去重；五档互斥为 1-5、6-10、11-20、21-50、51-100。MOM统一比较去年同月。</p><div class="charts">';
+  rankCharts += svgLineChart(category.title + ' BSR主池五档销量MOM', fineCombined, FINE_BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#1d4ed8', '#0891b2', '#059669', '#f59e0b', '#dc2626'][i] })), true);
+  rankCharts += svgLineChart(category.title + ' BSR主池头/中/尾销量MOM', tierCombined, BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#2563eb', '#059669', '#f97316'][i] })), true) + '</div>';
+  out += subsection(id + '-1-5', sectionNo + '.5 BSR主池五档与头中尾 MOM', rankCharts);
   let tierBody = '';
   for (const band of [...BANDS,...FINE_BANDS]) tierBody += tierTable((category.tiers[band.key] || category.fine[band.key]), band.name);
   tierBody += '<h4>年度同周期分层</h4>'+annualBandTable(category);
@@ -745,8 +743,8 @@ function genimoSection(category, overall, pp, genimoPP) {
     ];
   });
   let out = '<section id="genimo"><h2>第四部分｜GENIMO 品牌分析</h2>';
-  out += '<p class="lead">GENIMO 是整体市场中的品牌视角。本部分同时给出 GENIMO 在整体市场的份额、BSR Top100表现、头中尾分层与基于原始数据的 2027 年行动建议。</p>';
-  out += subsection('genimo-4-1', '4.1 月度表现与整体市场份额', table(['月份', 'GENIMO Listing数', '销量', '销售额($)', '平均标价($)', '销量占整体', '销售额占整体', '销量MOM', '销售额MOM', 'Top100 Listing数'], rows));
+  out += '<p class="lead">GENIMO 是整体市场中的品牌视角。本部分从同一 BSR 1—100、父ASIN去重主池中筛选品牌，给出 GENIMO 在整体市场和 PP 市场中的份额、BSR分层、进留退与基于原始数据的 2027 年行动建议。</p>';
+  out += subsection('genimo-4-1', '4.1 月度表现与整体市场份额', table(['月份', 'GENIMO父ASIN数', '销量', '销售额($)', '平均标价($)', '销量占整体', '销售额占整体', '销量MOM', '销售额MOM', 'BSR主池父ASIN数'], rows));
   const ppRows = genimoPP.monthly.map((r, i) => {
     const base = pp.monthly[i] || {};
     return [
@@ -761,7 +759,7 @@ function genimoSection(category, overall, pp, genimoPP) {
       fmtPct(r.momRevenue)
     ];
   });
-  let ppBody = '<p>PP市场份额分母为PP整体盘；GENIMO在PP中的统计仍沿用父ASIN优先/ASIN去重和Top100先筛选规则。</p>';
+  let ppBody = '<p>PP市场份额分母为PP主池；GENIMO PP来自同一 BSR 1—100、父ASIN去重主池中的品牌与PP交集。</p>';
   ppBody += table(['月份', 'GENIMO PP Listing数', 'PP内销量', 'PP内销售额($)', '平均标价($)', '销量占PP', '销售额占PP', '销量MOM', '销售额MOM'], ppRows);
   ppBody += '<h4>GENIMO PP年度YOY</h4>' + annualTable(genimoPP.annual, genimoPP.topAnnual, 'GENIMO PP');
   ppBody += '<div class="charts">' + svgBarChart('GENIMO PP 月销量', genimoPP.monthly, 'sales', '#be185d', 0) + svgBarChart('GENIMO PP 月销售额', genimoPP.monthly, 'revenue', '#9d174d', 2) + '</div>';
@@ -771,8 +769,7 @@ function genimoSection(category, overall, pp, genimoPP) {
   genimoCharts += svgLineChart('GENIMO平均标价',category.monthly,[{name:'平均标价($)',field:'avgPrice',color:'#9333ea'}]);
   genimoCharts += svgLineChart('GENIMO 销量MOM（去年同月）', category.monthly, [{ name: '销量MOM', field: 'momSales', color: '#2563eb' }], true) + '</div>';
   out += subsection('genimo-4-3', '4.3 GENIMO 趋势图', genimoCharts);
-  let genimoTierBody = '<h4>整体Top100内GENIMO（主视角）</h4>'+topTrendTable(category.topMonthly,category.topCandidateMonthly);
-  genimoTierBody += '<h4>补充：GENIMO品牌BSR范围回勾（取消额外截断后应与主池一致）</h4>'+topTrendTable(category.independentTopMonthly,category.topCandidateMonthly);
+  let genimoTierBody = '<h4>GENIMO BSR主池明细</h4>'+topTrendTable(category.topMonthly,category.topCandidateMonthly);
   for (const band of [...BANDS,...FINE_BANDS]) genimoTierBody += tierTable(category.tiers[band.key] || category.fine[band.key], 'GENIMO ' + band.name);
   for(const bs of [BANDS,FINE_BANDS]){const combined=MONTHS.map((month,i)=>({month,...Object.fromEntries(bs.map(b=>[b.key,(category.tiers[b.key]||category.fine[b.key])[i].momSales]))}));genimoTierBody+=svgLineChart('GENIMO整体榜内分层销量MOM',combined,bs.map((b,i)=>({name:b.name,field:b.key,color:['#2563eb','#059669','#f97316','#9333ea','#dc2626'][i]})),true);}
   out += subsection('genimo-4-4', '4.4 GENIMO BSR 头中尾与五档', genimoTierBody);
@@ -780,14 +777,14 @@ function genimoSection(category, overall, pp, genimoPP) {
   const latest = lastNonEmpty(category.monthly);
   const latestTop = category.topMonthly.find((r) => r.month === latest.month) || {};
   const advice = [
-    '先稳定能够进入 BSR 1—100 的链接：最新月 GENIMO Top100 有 ' + fmt(latestTop.count) + ' 个 Listing，销量 ' + fmt(latestTop.sales) + '。产品测试和链接补充应按 1-20、21-50、51-100 三个层级分别记录，不用单一总排名替代层级判断。',
+    '先稳定能够进入 BSR 1—100 的链接：最新月 GENIMO 主池有 ' + fmt(latestTop.count) + ' 个父ASIN，销量 ' + fmt(latestTop.sales) + '。产品测试和链接补充应按 1-20、21-50、51-100 三个层级分别记录，不用单一总排名替代层级判断。',
     '用整体市场份额和 PP/高客单价市场拆分制定资源优先级：当 GENIMO 在某一市场的销量或销售额占比连续上升时，优先补充该市场相同字段完整且 BSR 可追踪的链接；当份额下降时，先核对缺失销量、销售额、价格和 BSR 的覆盖率，再决定是否调整产品组合。',
-    '建立月度复盘表：销量、销售额、平均标价、销量MOM、销售额MOM、Top100数量、头中尾占比和标题中 plastic 标记必须同批次留痕。报告只使用原始工作簿已有字段，不推导利润、成本、广告或库存指标。'
+    '建立月度复盘表：销量、销售额、平均标价、销量MOM、销售额MOM、BSR主池数量、头中尾占比和代表标题 plastic 标记必须同批次留痕。报告只使用原始工作簿已有字段，不推导利润、成本、广告或库存指标。'
   ].map((item) => '<li>' + esc(item) + '</li>').join('');
   const evidence=narrative(category,overall,pp,null).map(t=>'<li>'+esc(t)+'</li>').join('');
   const planRows=BANDS.map(b=>{const r=category.annualBands[b.key].at(-1);const total=category.topAnnual.at(-1);return [b.name,fmt(r.sales),fmt(r.count),fmt(r.count>0?r.sales/r.count:null,2),fmtPct(total.sales>0?r.sales/total.sales:null),fmt(r.avgPrice,2),'待输入总链接数'];});
   out += subsection('genimo-4-6', '4.6 2027 年建议（仅基于当前原始字段）', '<div class="analysis"><ul class="analysis-list">' + evidence + advice + '<li>新增链接总量在XLSX 08页B3输入，默认空；按上表最近年度核心期品牌榜内销量权重分配，前两档向下取整、尾档取余。是资源分配情景，不是销量预测。</li><li>花型、颜色和尺寸尚未可靠提取，不能据此建议具体花型；不推导利润、广告或库存。</li></ul></div>'+table(['目标BSR层级','核心期销量','Listing月次','单Listing月次销量','分配权重','历史标价($)','新增链接数'],planRows));
-  out += subsection('genimo-4-7','4.7 整体Top100内GENIMO进留退', '<p>比较相邻自然月榜内Listing集合；进入/退出不等于上新/下架。</p>'+table(['月份','基期月份','当前','基期','进入','保留','退出'],category.movements.map(r=>[r.month,r.previous,...['current','prior','entered','retained','exited'].map(k=>fmt(r[k]))]))+table(['月份','Listing键','基期BSR','本期BSR','状态'],category.movements.flatMap(r=>r.details.map(x=>[r.month,x.key,fmt(x.previousRank),fmt(x.currentRank),x.state]))));
+  out += subsection('genimo-4-7','4.7 GENIMO BSR主池进留退', '<p>比较相邻自然月主池内父ASIN集合；进入/退出不等于上新/下架。</p>'+table(['月份','基期月份','当前','基期','进入','保留','退出'],category.movements.map(r=>[r.month,r.previous,...['current','prior','entered','retained','exited'].map(k=>fmt(r[k]))]))+table(['月份','父ASIN键','基期BSR','本期BSR','状态'],category.movements.flatMap(r=>r.details.map(x=>[r.month,x.key,fmt(x.previousRank),fmt(x.currentRank),x.state]))));
   out += '</section>';
   return out;
 }
@@ -838,26 +835,26 @@ function buildHtml(raw, categories) {
     ['dashboard-0-3', '0.3 原始字段覆盖']
   ]) + navGroup('overall', '整', '整体市场', [
     ['overall-1-1', '1.1 月度汇总与可回勾数据'],
-    ['overall-1-2', '1.2 BSR Top100 月度明细'],
+    ['overall-1-2', '1.2 BSR主池月度明细'],
     ['overall-1-3', '1.3 年度 YOY 汇总'],
     ['overall-1-4', '1.4 市场趋势图'],
-    ['overall-1-5', '1.5 BSR Top100 五档与头中尾 MOM'],
+    ['overall-1-5', '1.5 BSR主池五档与头中尾 MOM'],
     ['overall-1-6', '1.6 头部 / 中部 / 尾部明细'],
     ['overall-1-7', '1.7 数据驱动文字分析']
   ]) + navGroup('pp', 'PP', 'PP市场', [
     ['pp-1-1', '2.1 月度汇总与可回勾数据'],
-    ['pp-1-2', '2.2 BSR Top100 月度明细'],
+    ['pp-1-2', '2.2 BSR主池月度明细'],
     ['pp-1-3', '2.3 年度 YOY 汇总'],
     ['pp-1-4', '2.4 市场趋势图'],
-    ['pp-1-5', '2.5 BSR Top100 五档与头中尾 MOM'],
+    ['pp-1-5', '2.5 BSR主池五档与头中尾 MOM'],
     ['pp-1-6', '2.6 头部 / 中部 / 尾部明细'],
     ['pp-1-7', '2.7 数据驱动文字分析']
   ]) + navGroup('nonpp', '高', '高客单价市场', [
     ['nonpp-1-1', '3.1 月度汇总与可回勾数据'],
-    ['nonpp-1-2', '3.2 BSR Top100 月度明细'],
+    ['nonpp-1-2', '3.2 BSR主池月度明细'],
     ['nonpp-1-3', '3.3 年度 YOY 汇总'],
     ['nonpp-1-4', '3.4 市场趋势图'],
-    ['nonpp-1-5', '3.5 BSR Top100 五档与头中尾 MOM'],
+    ['nonpp-1-5', '3.5 BSR主池五档与头中尾 MOM'],
     ['nonpp-1-6', '3.6 头部 / 中部 / 尾部明细'],
     ['nonpp-1-7', '3.7 数据驱动文字分析']
   ]) + navGroup('genimo', 'G', 'GENIMO品牌', [
@@ -871,21 +868,22 @@ function buildHtml(raw, categories) {
   ]);
   let html = '<!doctype html><html lang="zh-CN" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>户外地垫市场洞察 · Outdoor Rug Intelligence</title><style>' + UI_CSS + compatibilityCss + '</style></head><body><div class="app-shell">';
   html += '<aside class="sidebar"><div class="brand"><div class="brand-mark"></div><div><strong>Market Intelligence</strong><small>户外地垫市场分析系统</small></div></div><div class="local-badge"><i></i> DATA · VERIFIED</div><span class="nav-label">市场分析</span><nav>' + nav + '</nav><div class="sidebar-footer"><span>可比数据范围</span><strong>' + esc(MONTHS[0]) + ' — ' + esc(MONTHS[MONTHS.length - 1]) + '</strong><small>' + fmt(MONTHS.length) + '个月 · 原始主源直读</small></div></aside>';
-  html += '<div class="workspace"><header class="topbar"><div><span class="eyebrow">MARKET OVERVIEW · SPEC 2.0</span><h1>户外地垫市场分析</h1><p>整体市场、PP市场、高客单价市场与 GENIMO 品牌 · 销量、销售额、均价 · BSR Top100 · MOM / YOY</p></div><div class="top-actions"><span class="privacy-chip"><i></i> 源数据只读</span><button class="theme-button" id="theme-toggle" aria-label="切换主题">☀</button></div></header><main class="content">';
-  html += '<section id="dashboard" class="overview-section"><div class="section-kicker">报告导航 · 0</div><h2>市场总览｜范围与数据口径</h2><p class="lead">先确认数据范围、市场划分和统计单元，再进入四个分析部分。下面每个小节都可以点击左侧导航展开，也可以点击标题前的小三角收起。</p>';
-  html += subsection('dashboard-0-1', '0.1 分析范围与关键指标', '<div class="scope-notice"><span>◎</span><div><b>分析范围：</b>原始工作簿覆盖 ' + MONTHS.length + ' 个月；整体市场由 PP 与高客单价市场构成，GENIMO 作为品牌视角单独分析。BSR Top100 使用 1—100（包含100）的独立池。</div></div><div class="metrics-grid"><article class="metric-card"><span class="metric-label">原始有效行</span><strong class="metric-value">' + fmt(rawCount) + '</strong><span class="metric-note">逐月明细读取</span></article><article class="metric-card"><span class="metric-label">整体盘去重 Listing</span><strong class="metric-value">' + fmt(categories.overall.fullRows.length) + '</strong><span class="metric-note">父ASIN优先 / ASIN兜底</span></article><article class="metric-card"><span class="metric-label">BSR Top100 去重</span><strong class="metric-value">' + fmt(categories.overall.topRows.length) + '</strong><span class="metric-note">小类BSR 1—100 含100</span></article><article class="metric-card"><span class="metric-label">GENIMO Listing</span><strong class="metric-value">' + fmt(categories.genimo.fullRows.length) + '</strong><span class="metric-note">品牌整体视角</span></article></div>');
+  html += '<div class="workspace"><header class="topbar"><div><span class="eyebrow">MARKET OVERVIEW · SPEC 2.1</span><h1>户外地垫市场分析</h1><p>统一 BSR 主池 · 整体市场、PP市场、高客单价市场与 GENIMO 品牌 · 销量、销售额、均价 · MOM / YOY</p></div><div class="top-actions"><span class="privacy-chip"><i></i> 源数据只读</span><button class="theme-button" id="theme-toggle" aria-label="切换主题">☀</button></div></header><main class="content">';
+  html += '<section id="dashboard" class="overview-section"><div class="section-kicker">报告导航 · 0</div><h2>数据总览</h2><p class="lead">先确认数据范围、统计顺序和代表行，再进入四个分析部分。每个小节都可以点击左侧导航定位，也可以点击标题前的小三角收起。</p>';
+  html += subsection('dashboard-0-1', '0.1 分析范围与关键指标', '<div class="scope-notice"><span>◎</span><div><b>分析范围：</b>原始工作簿覆盖 ' + MONTHS.length + ' 个月；每月先筛 BSR 1—100（包含100），再按父ASIN去重形成唯一主池。整体市场由 PP 与高客单价补集构成，GENIMO 作为同一主池中的品牌视角。</div></div><div class="metrics-grid"><article class="metric-card"><span class="metric-label">原始有效行</span><strong class="metric-value">' + fmt(rawCount) + '</strong><span class="metric-note">逐月明细读取</span></article><article class="metric-card"><span class="metric-label">BSR候选原始行</span><strong class="metric-value">' + fmt(topCandidates) + '</strong><span class="metric-note">BSR 1—100（含100）</span></article><article class="metric-card"><span class="metric-label">BSR主池父ASIN月次</span><strong class="metric-value">' + fmt(categories.overall.topRows.length) + '</strong><span class="metric-note">父ASIN去重后唯一主池</span></article><article class="metric-card"><span class="metric-label">GENIMO主池父ASIN月次</span><strong class="metric-value">' + fmt(categories.genimo.fullRows.length) + '</strong><span class="metric-note">代表品牌精确匹配</span></article></div>');
   const scopeBullets = [
-    '整体市场 = PP市场 ∪ 高客单价市场，两者互补且共同构成整体市场。',
-    'PP市场使用商品标题中的完整单词 plastic 匹配；高客单价市场为未匹配 plastic 的补集。',
+    '处理顺序：BSR 1—100（含100）→ 父ASIN去重并选代表 → 代表标题/品牌分类。',
+    '整体市场 = PP市场 ∪ 高客单价市场，两者是同一BSR主池中的互补分区。',
+    'PP市场使用代表商品标题中的完整单词 plastic 匹配；高客单价市场为未匹配 plastic 的补集。',
     '月度 MOM 比较本月与去年同月；年度 YOY 比较本年与上一年度，未完结年度按实际覆盖范围标记。',
     '数据源：' + esc(SOURCE) + '；SHA-256：' + esc(SOURCE_HASH) + '。',
     '可解析小类BSR ' + fmt(ranked) + ' 行，BSR 1—100（包含100）的候选 ' + fmt(topCandidates) + ' 行；月度子表有数据 ' + fmt(sourceMonthsWithData) + '/' + fmt(raw.sheetStats.length) + '，识别表头行 ' + esc(detectedHeaderRows.join('、')) + '。',
-    auditOverall ? '抽查 2025.09：BSR 1—100 原始候选 ' + fmt(auditOverall.rawCount) + ' 行，去重后 ' + fmt(auditOverall.count) + ' 个 Listing；PP按Listing组归类为 ' + fmt(auditPp.rawCount) + ' 行/' + fmt(auditPp.count) + ' 个，非PP为 ' + fmt(auditNonpp.rawCount) + ' 行/' + fmt(auditNonpp.count) + ' 个。若在源表同时勾选标题含 plastic，看到的 ' + fmt(auditTitlePpRows) + ' 行是逐行PP命中数，不是整体市场数。' : '',
+    auditOverall ? '抽查 2025.09：BSR 1—100 原始候选 ' + fmt(auditOverall.rawCount) + ' 行，父ASIN去重后 ' + fmt(auditOverall.count) + ' 个；按代表标题分类，PP为 ' + fmt(auditPp.count) + ' 个，高客单价为 ' + fmt(auditNonpp.count) + ' 个，合计回到 ' + fmt(auditOverall.count) + ' 个。源表逐行标题含 plastic 的 ' + fmt(auditTitlePpRows) + ' 行仅是行级命中数。' : '',
     '缺失值保留为空，不当作零；原始字段只用于市场统计、筛选和回勾。'
   ].map((item) => '<li>' + item + '</li>').join('');
   const statUnitBullets = [
-    '统计单元：独立 Listing（父ASIN优先，否则ASIN；均无则保留源行）。',
-    '代表行：按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。',
+    '统计单元：BSR合格候选中的父ASIN月次；缺失父ASIN的合格记录单独列异常，不改用ASIN或源行作业务键。',
+    '代表行：只在BSR合格父ASIN组内按最小可解析BSR、销量/销售额完整度、价格完整度、源行ID确定。',
     '原始字段覆盖表：仅做只读回勾，不参与任何利润推导。'
   ].map((item) => '<li>' + item + '</li>').join('');
   const scopeBody = '<div class="scope-notice"><span>◎</span><div><b>口径与来源：</b><ul class="analysis-list compact-list">' + scopeBullets + '</ul></div></div><div class="meta"><b>统计单元与代表行</b><ul class="analysis-list compact-list">' + statUnitBullets + '</ul></div>';
@@ -915,45 +913,46 @@ function metricEqual(a, b) {
 function buildDataset() {
   MONTHS.length = 0;
   const raw = readRawRows();
-  const flags = buildFamilyFlags(raw.rows);
-  const fullDedup = dedup(raw.rows, flags);
+  // The sole business pool starts with the numeric BSR predicate.  Do not
+  // create an unfiltered "full market" pool and then intersect it later:
+  // doing so lets out-of-range child rows affect parent representatives and
+  // PP/GENIMO classification.
   const topCandidates = raw.rows.filter((r) => r.rank !== null && r.rank >= 1 && r.rank <= 100);
-  // Apply the BSR predicate to source rows before forming the Top100 Listing
-  // pool. This keeps the implementation aligned with SPEC 2.0 and makes the
-  // candidate-row count independently auditable against the source sheet.
-  const topCandidateDedup = dedup(topCandidates, flags);
-  // The user requested a numeric BSR range, not a second 100-row truncation.
-  // Retain every eligible Listing, including tied/multiple-category ranks.
-  const selectTop100 = (rows) => {
-    const byMonth = new Map();
-    for (const row of rows) {
-      if (row.rank === null || row.rank < 1 || row.rank > 100) continue;
-      if (!byMonth.has(row.month)) byMonth.set(row.month, []);
-      byMonth.get(row.month).push(row);
-    }
-    return MONTHS.flatMap((month) => (byMonth.get(month) || [])
-      .slice()
-      .sort((a, b) => a.rank - b.rank || a.familyKey.localeCompare(b.familyKey) || a.sourceRow - b.sourceRow)
-      );
-  };
-  const topDedup = selectTop100(topCandidateDedup);
-  const ppRows = fullDedup.filter((r) => r.plastic);
-  const nonppRows = fullDedup.filter((r) => !r.plastic);
-  const genimoRows = fullDedup.filter((r) => r.genimo);
-  const genimoPPRows = fullDedup.filter((r) => r.genimo && r.plastic);
-  const ppTopCandidates = topCandidateDedup.filter((r) => r.plastic);
-  const nonppTopCandidates = topCandidateDedup.filter((r) => !r.plastic);
-  const genimoTopCandidates = topCandidateDedup.filter((r) => r.genimo);
-  const genimoPPTopCandidates = topCandidateDedup.filter((r) => r.genimo && r.plastic);
+  const missingParentCandidates = topCandidates.filter((r) => !r.parent);
+  if (missingParentCandidates.length) {
+    throw new Error('BSR合格记录缺失父ASIN，不能按新口径形成业务统计主池: ' + missingParentCandidates.length);
+  }
+  const mainPool = dedup(topCandidates);
+  // Keep the historical property names as aliases for downstream builders,
+  // but both now point to the same BSR-filtered parent-ASIN pool.  There is no
+  // second unfiltered market branch and no additional 100-row truncation.
+  const fullDedup = mainPool;
+  const topCandidateDedup = mainPool;
+  const topDedup = mainPool;
+  const ppRows = mainPool.filter((r) => r.plastic);
+  const nonppRows = mainPool.filter((r) => !r.plastic);
+  const genimoRows = mainPool.filter((r) => r.genimo);
+  const genimoPPRows = mainPool.filter((r) => r.genimo && r.plastic);
+  const topCandidatesFor = (rows) => rows;
+  const ppTopCandidates = topCandidatesFor(ppRows);
+  const nonppTopCandidates = topCandidatesFor(nonppRows);
+  const genimoTopCandidates = topCandidatesFor(genimoRows);
+  const genimoPPTopCandidates = topCandidatesFor(genimoPPRows);
   const categories = {
-    overall: buildCategory('整体市场', fullDedup, topDedup, topCandidateDedup),
-    pp: buildCategory('PP市场', ppRows, selectTop100(ppTopCandidates), ppTopCandidates),
-    nonpp: buildCategory('高客单价市场', nonppRows, selectTop100(nonppTopCandidates), nonppTopCandidates),
-    genimo: buildCategory('GENIMO品牌', genimoRows, topDedup.filter(r => r.genimo), genimoTopCandidates),
-    genimoPP: buildCategory('GENIMO PP市场', genimoPPRows, topDedup.filter(r => r.genimo && r.plastic), genimoPPTopCandidates),
-    globalPP: buildCategory('整体Top100内PP', topDedup.filter(r => r.plastic), topDedup.filter(r => r.plastic), ppTopCandidates),
-    globalHigh: buildCategory('整体Top100内高客单价', topDedup.filter(r => !r.plastic), topDedup.filter(r => !r.plastic), nonppTopCandidates),
-    genimoIndependent: buildCategory('GENIMO品牌BSR范围回勾', genimoRows, selectTop100(genimoTopCandidates), genimoTopCandidates)
+    // Candidate audit rows are the parent-dedup groups with rawRows retained,
+    // so the table can show both 114 source candidates and 96 parent ASINs
+    // instead of mistaking the raw row count for the deduplicated pool.
+    overall: buildCategory('整体市场', mainPool, mainPool, topCandidateDedup),
+    pp: buildCategory('PP市场', ppRows, ppRows, ppRows),
+    nonpp: buildCategory('高客单价市场', nonppRows, nonppRows, nonppRows),
+    genimo: buildCategory('GENIMO品牌', genimoRows, genimoRows, genimoRows),
+    genimoPP: buildCategory('GENIMO PP市场', genimoPPRows, genimoPPRows, genimoPPRows),
+    // Compatibility aliases used by the workbook's composition section. All
+    // aliases are subsets of the same mainPool and therefore cannot re-open
+    // an unfiltered branch.
+    globalPP: buildCategory('整体市场中的PP', ppRows, ppRows, ppRows),
+    globalHigh: buildCategory('整体市场中的高客单价', nonppRows, nonppRows, nonppRows),
+    genimoIndependent: buildCategory('GENIMO品牌（同一BSR主池回勾）', genimoRows, genimoRows, genimoRows)
   };
   for (let i = 0; i < MONTHS.length; i += 1) {
     const overallMonth = categories.overall.monthly[i];
@@ -978,7 +977,20 @@ function buildDataset() {
     const details = [...new Set([...before.keys(), ...after.keys()])].sort().map(key => ({key, previousRank: before.get(key)?.rank ?? null, currentRank: after.get(key)?.rank ?? null, state: !available ? '无基期' : before.has(key) ? (after.has(key) ? '保留' : '退出') : '进入'}));
     return {month, previous, available, current:after.size, prior:available ? before.size : null, entered:available ? details.filter(r => r.state === '进入').length : null, retained:available ? details.filter(r => r.state === '保留').length : null, exited:available ? details.filter(r => r.state === '退出').length : null, details};
   });
-  const metadata={specVersion:'2.1',sourceSha256:SOURCE_HASH,generatedAt:new Date().toISOString(),batchId:'spec21-'+SOURCE_HASH.slice(0,12),latestMonth:MONTHS.at(-1)};
+  const metadata={
+    specVersion:'2.1',
+    sourceSha256:SOURCE_HASH,
+    generatedAt:new Date().toISOString(),
+    batchId:'spec21-'+SOURCE_HASH.slice(0,12),
+    latestMonth:MONTHS.at(-1),
+    analysisOrder:'BSR 1-100 inclusive -> parent ASIN dedup -> representative title/brand classification',
+    bsrCandidateRows:topCandidates.length,
+    bsrCandidateParentRows:mainPool.length,
+    analysisPoolListingMonths:mainPool.length,
+    missingParentCandidateRows:missingParentCandidates.length,
+    classificationRule:'representative title complete-word plastic; representative brand exact GENIMO',
+    overallCompositionRule:'overall = PP + high-price complement'
+  };
   categories.genimo.movements=movements;
   categories.genimo.independentTopMonthly=categories.genimoIndependent.topMonthly;
   categories.overall.composition=MONTHS.map((month,i)=>({month,overall:categories.overall.topMonthly[i],pp:categories.globalPP.topMonthly[i],high:categories.globalHigh.topMonthly[i]}));
@@ -999,7 +1011,7 @@ function buildDataset() {
       if(r.count && (Math.abs(percent(current,priorYear) ?? 0)>.3 || Math.abs(percent(current,priorMonth) ?? 0)>.3)) r.quality='可比性受限';
     }
   }
-  return { raw, fullDedup, topCandidates, topCandidateDedup, topDedup, categories, movements, metadata };
+  return { raw, fullDedup, mainPool, topCandidates, topCandidateDedup, topDedup, categories, movements, metadata };
 }
 
 function runHtmlBuild() {

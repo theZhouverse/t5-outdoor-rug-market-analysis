@@ -10,19 +10,22 @@ const PY=process.env.SPEC21_PYTHON || path.join(process.env.USERPROFILE || '', '
 function run(file){return new Promise((resolve,reject)=>{const p=spawn(PY,['-u',file],{cwd:ROOT,stdio:'inherit',windowsHide:true,env:{...process.env,PYTHONIOENCODING:'utf-8'}});p.on('error',reject);p.on('exit',code=>code===0?resolve():reject(new Error(file+' failed: '+code)));});}
 const mdTable=(headers,rows)=>['|'+headers.join('|')+'|','|'+headers.map(()=>'---').join('|')+'|',...rows.map(r=>'|'+r.map(v=>String(v ?? '—').replaceAll('|',' / ')).join('|')+'|')].join('\n');
 export function writeReports(d){
- const publicData={metadata:d.metadata,months:[...MONTHS],sheetStats:d.raw.sheetStats,rawRowCount:d.raw.rows.length,dedupRowCount:d.fullDedup.length,categories:{},movements:d.movements};
- for(const [scope,cat] of Object.entries(d.categories)){const {fullRows,topRows,...rest}=cat;publicData.categories[scope]=rest;}
+ const publicData={metadata:d.metadata,months:[...MONTHS],sheetStats:d.raw.sheetStats,rawRowCount:d.raw.rows.length,dedupRowCount:d.mainPool.length,categories:{},movements:d.movements};
+ // The public report exposes the four business parts and the GENIMO–PP
+ // auxiliary view. Compatibility aliases used only by the workbook formula
+ // plan are deliberately kept out of the delivered JSON.
+ for(const scope of ['overall','pp','nonpp','genimo','genimoPP']){const cat=d.categories[scope];const {fullRows,topRows,...rest}=cat;publicData.categories[scope]=rest;}
  const base='交付/户外地垫市场分析';
  fs.mkdirSync('交付',{recursive:true});
  let html=buildHtml(d.raw,d.categories).replaceAll('SPEC 2.0','SPEC 2.1').replace('DATA · VERIFIED','DATA · SOURCE').replace('市场总览｜范围与数据口径','数据总览').replace('整体盘去重 Listing</span>','整体盘 Listing月次</span>').replace('BSR Top100 去重</span>','BSR Top100 Listing月次</span>').replace('GENIMO Listing</span>','GENIMO Listing月次</span>');
  html=html.replace('</head>','<script id="report-metadata" type="application/json">'+JSON.stringify(d.metadata).replaceAll('<','\\u003c')+'</script></head>');
  html=html.replace('原始字段只用于市场统计、筛选和回勾。','原始字段只用于市场统计、筛选和回勾。年度YOY仅取相邻年共同覆盖月份；BSR数值1—100筛选后保留全部去重商品；PP与高客单价范围相加等于整体。');
- const preamble='# 户外地垫市场分析 SPEC 2.1\n\n'+Object.entries(d.metadata).map(([k,v])=>'- '+k+'：'+v).join('\n')+'\n\n整体=PP+高客单价；GENIMO是品牌视角。月度MOM=本月/去年同月−1；年度YOY=相邻年共同月份。无有效值不补零。源估算不等于真实成交。\n';
+ const preamble='# 户外地垫市场分析 SPEC 2.1\n\n'+Object.entries(d.metadata).map(([k,v])=>'- '+k+'：'+v).join('\n')+'\n\n统一处理顺序：BSR 1—100（含100）→ 父ASIN去重并选代表 → 代表标题/品牌分类；整体=PP+高客单价补集；GENIMO来自同一主池。月度MOM=本月/去年同月−1；年度YOY=相邻年共同月份。无有效值不补零。源估算不等于真实成交。\n';
  let md=preamble,quick=preamble;
  for(const [index,scope] of ['overall','pp','nonpp','genimo'].entries()){
   const cat=d.categories[scope];const analysis=narrative(cat,d.categories.overall,d.categories.pp,d.categories.nonpp);
   const text='\n## '+(index+1)+' '+cat.title+'\n\n'+analysis.map(t=>'- '+t).join('\n')+'\n';md+=text;quick+=text;
-  for(const [title,rows] of [['月度汇总',cat.monthly],['BSR Top100月度',cat.topMonthly]]) md+='\n### '+title+'\n\n'+mdTable(['月份','Listing','销量','金额($)','标价($)','配对均价($)','销量MOM','金额MOM','基期Listing','可比性'],rows.map(r=>[r.month,fmt(r.count),fmt(r.sales),fmt(r.revenue,2),fmt(r.avgPrice,2),fmt(r.pairedAsp,2),fmtPct(r.momSales),fmtPct(r.momRevenue),fmt(r.comparisonCount),r.quality]))+'\n';
+  for(const [title,rows] of [['BSR主池月度汇总',cat.monthly],['BSR主池月度回勾',cat.topMonthly]]) md+='\n### '+title+'\n\n'+mdTable(['月份','父ASIN月次','销量','金额($)','标价($)','配对均价($)','销量MOM','金额MOM','去年同月父ASIN月次','可比性'],rows.map(r=>[r.month,fmt(r.count),fmt(r.sales),fmt(r.revenue,2),fmt(r.avgPrice,2),fmt(r.pairedAsp,2),fmtPct(r.momSales),fmtPct(r.momRevenue),fmt(r.comparisonCount),r.quality]))+'\n';
   md+='\n### 年度总量与共同月份YOY\n\n'+mdTable(['年份','本期月份','同比期间','Listing月次','销量','金额($)','销量YOY','金额YOY','同比本期销量','同比基期销量','同比本期金额','同比基期金额'],cat.annual.map(r=>[r.year,r.coverage,r.yoyPeriod,fmt(r.count),fmt(r.sales),fmt(r.revenue,2),fmtPct(r.yoySales),fmtPct(r.yoyRevenue),fmt(r.currentComparable.sales),fmt(r.previousComparable.sales),fmt(r.currentComparable.revenue,2),fmt(r.previousComparable.revenue,2)]))+'\n';
   for(const band of [...BANDS,...FINE_BANDS])md+='\n### BSR '+band.name+'\n\n'+mdTable(['月份','Listing','销量','金额($)','销量MOM','金额MOM'],(cat.tiers[band.key]||cat.fine[band.key]).map(r=>[r.month,fmt(r.count),fmt(r.sales),fmt(r.revenue,2),fmtPct(r.momSales),fmtPct(r.momRevenue)]))+'\n';
  }

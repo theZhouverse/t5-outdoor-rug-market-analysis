@@ -1,48 +1,62 @@
 {
   "specVersion": "2.1",
   "sourceSha256": "9ced3b100ece7d441b45ce8a1bd0eb9d3470854a832f071b02ecc2c6f91f5fac",
-  "generatedAt": "2026-09-12T15:22:17.712Z",
+  "generatedAt": "2026-09-14T06:35:07.044Z",
   "batchId": "spec21-9ced3b100ece",
   "latestMonth": "202607",
+  "analysisOrder": "BSR 1-100 inclusive -> parent ASIN dedup -> representative title/brand classification",
+  "bsrCandidateRows": 9973,
+  "bsrCandidateParentRows": 5190,
+  "analysisPoolListingMonths": 5190,
+  "missingParentCandidateRows": 0,
+  "classificationRule": "representative title complete-word plastic; representative brand exact GENIMO",
+  "overallCompositionRule": "overall = PP + high-price complement",
   "files": [
     {
       "path": "交付/户外地垫市场分析报告-优化版.html",
-      "sha256": "09a0885aef350f2a0d90f3459b9e048a699f435bdc153b12c3060ed2ebbbf149",
-      "bytes": 1151563
+      "sha256": "8ae192ad00cf116797b21d86b61e62c76de1ee5bf7657864a5a4075b3ad7a78a",
+      "bytes": 1139936
     },
     {
       "path": "交付/户外地垫市场分析数据.json",
-      "sha256": "32820fd697bbcd3df00dee0fd9f3d2fa088e64f090f4278ee083fa719aff6fe8",
-      "bytes": 4143197
+      "sha256": "5dd3d103773aadd2e3ad481b8bd7ae376ef814700776f52f46891587c212f102",
+      "bytes": 2701754
     },
     {
       "path": "交付/户外地垫市场分析报告-优化版.md",
-      "sha256": "6d6ba958ccd5c8987b9c05a2399e89c526774d54ad3c8b722ea60c8cb6f65168",
-      "bytes": 111597
+      "sha256": "8e15da406ea8b6963694f80fafe33e534de05dbf6b5d82a7bc4ecd180a0799ee",
+      "bytes": 111384
     },
     {
       "path": "交付/户外地垫市场分析报告-极速版.md",
-      "sha256": "85f09abb72bc4f3ef3519742721c07d72c0ac19799223c3204eb2950e92fdc37",
-      "bytes": 9075
+      "sha256": "6c035e668c85818833e6490002b1eb849431896358472e9d0a7eea0e17fb9beb",
+      "bytes": 9355
     },
     {
       "path": "outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-可回勾版.xlsx",
-      "sha256": "9d508d03c82e735fc9b2f908278f951076a587c5cd27628977536e250fc69299",
-      "bytes": 48252835
+      "sha256": "f5826048b7a0a552ab940951f60a0eb859d4824beabf2b71a5bb3833710963a1",
+      "bytes": 20085014
     }
   ],
   "formulaAudit": {
     "engine": "SPEC2.1 explicit Excel subset evaluator (not desktop Excel)",
-    "formulaCount": 2196411,
-    "independentExpectedComparisons": 1911423,
+    "formulaCount": 393073,
+    "independentExpectedComparisons": 345975,
     "mismatches": [],
     "mismatchCount": 0,
     "metadata": {
       "specVersion": "2.1",
       "sourceSha256": "9ced3b100ece7d441b45ce8a1bd0eb9d3470854a832f071b02ecc2c6f91f5fac",
-      "generatedAt": "2026-09-12T15:22:17.712Z",
+      "generatedAt": "2026-09-14T06:35:07.044Z",
       "batchId": "spec21-9ced3b100ece",
-      "latestMonth": "202607"
+      "latestMonth": "202607",
+      "analysisOrder": "BSR 1-100 inclusive -> parent ASIN dedup -> representative title/brand classification",
+      "bsrCandidateRows": 9973,
+      "bsrCandidateParentRows": 5190,
+      "analysisPoolListingMonths": 5190,
+      "missingParentCandidateRows": 0,
+      "classificationRule": "representative title complete-word plastic; representative brand exact GENIMO",
+      "overallCompositionRule": "overall = PP + high-price complement"
     }
   }
 }

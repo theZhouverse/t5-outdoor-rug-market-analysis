@@ -4,6 +4,9 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 N={'s':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 D=json.loads((ROOT/'交付/户外地垫市场分析数据.json').read_text(encoding='utf-8'));manifest=json.loads((ROOT/'交付/构建清单-SPEC2.1.json').read_text(encoding='utf-8'));assert D['metadata']=={k:manifest[k] for k in D['metadata']}
+assert D['metadata']['analysisOrder']=='BSR 1-100 inclusive -> parent ASIN dedup -> representative title/brand classification'
+assert D['metadata']['bsrCandidateRows']==9973 and D['metadata']['analysisPoolListingMonths']==5190
+assert set(D['categories'])=={'overall','pp','nonpp','genimo','genimoPP'}
 for item in manifest['files']:assert hashlib.sha256((ROOT/item['path']).read_bytes()).hexdigest()==item['sha256'],item['path']
 plans={};sn=None
 for line in open(ROOT/'tmp/formula_market_builder/workbook_plan.jsonl',encoding='utf-8'):
@@ -62,7 +65,7 @@ for scope,sn in [('overall','01_整体市场月度'),('pp','02_PP市场月度'),
   for level,columns in [('monthly',{'count':'B','sales':'C','revenue':'D','avgPrice':'E','pairedAsp':'F','momSales':'G','momRevenue':'H','quality':'S'}),('topMonthly',{'count':'L','sales':'M','revenue':'N','avgPrice':'O','pairedAsp':'P','momSales':'Q','momRevenue':'R'})]:
    rec=D['categories'][scope][level][i-5]
    for field,c in columns.items():checks+=1;assert same(public[sn].get(c+str(i)),rec[field]),(sn,m,c,public[sn].get(c+str(i)),rec[field])
-for block,(scope,level) in enumerate([('genimo','monthly'),('genimoPP','monthly'),('genimo','topMonthly'),('genimoIndependent','topMonthly')]):
+for block,(scope,level) in enumerate([('genimo','monthly'),('genimoPP','monthly'),('genimo','topMonthly'),('genimo','topMonthly')]):
  for i,rec in enumerate(D['categories'][scope][level],5+block*54):
   for field,c in [('count','B'),('sales','C'),('revenue','D'),('avgPrice','E'),('pairedAsp','F'),('momSales','G'),('momRevenue','H')]:checks+=1;assert same(public['04_GENIMO品牌月度'].get(c+str(i)),rec[field]),(scope,i,c)
 for r in range(5,1605):
@@ -70,6 +73,7 @@ for r in range(5,1605):
   assert public['06_BSR分层'].get('G'+str(r)) in [None,''];assert public['06_BSR分层'].get('H'+str(r)) in [None,'']
 assert all(v=='通过' for k,v in public['93_数据校验'].items() if re.fullmatch(r'D\d+',k) and int(k[1:])>=5)
 for scope in ['01_整体市场月度','02_PP市场月度','03_高客单价市场月度']:assert public[scope]['G4']=='销量MOM'
+for scope in ['01_整体市场月度','02_PP市场月度','03_高客单价市场月度']:assert public[scope]['L4']=='BSR主池Listing数'
 assert public['05_年度YOY']['F4']=='Listing月次'
 assert public['08_2027规划与分析'].get('B3') is None
 for f in ['户外地垫市场分析报告-优化版.md','户外地垫市场分析报告-极速版.md','户外地垫市场分析报告-优化版.html']:
