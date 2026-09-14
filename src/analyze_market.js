@@ -11,10 +11,11 @@ const ROOT = path.resolve(__dirname, '..');
 const DB_PATH = path.resolve(ROOT, process.env.ANALYSIS_DB_PATH || 'data/processed/market.db');
 const COMPETITOR_DB_PATH = path.resolve(ROOT, process.env.COMPETITOR_DB_PATH || 'data/processed/competitor_809440.db');
 const REPORT_CUTOFF = process.env.ANALYSIS_CUTOFF || '202606'; // SPEC 1.2: 核心截止 202606
-const MD_PATH = path.resolve(ROOT, '交付/户外地垫市场分析报告-优化版.md');
-const HTML_PATH = path.resolve(ROOT, '交付/户外地垫市场分析报告-优化版.html');
-const JSON_PATH = path.resolve(ROOT, '交付/户外地垫市场分析数据.json');
-const QUICK_PATH = path.resolve(ROOT, '交付/户外地垫市场分析报告-极速版.md');
+// Historical SQLite analysis is isolated from the SPEC 2.1 delivery paths.
+const MD_PATH = path.resolve(ROOT, 'outputs/legacy-db/户外地垫市场分析报告-优化版.md');
+const HTML_PATH = path.resolve(ROOT, 'outputs/legacy-db/户外地垫市场分析报告-优化版.html');
+const JSON_PATH = path.resolve(ROOT, 'outputs/legacy-db/户外地垫市场分析数据.json');
+const QUICK_PATH = path.resolve(ROOT, 'outputs/legacy-db/户外地垫市场分析报告-极速版.md');
 const PLAN_REFERENCE_PATH = path.resolve(ROOT, '新增参考的材料和内容/销量预测计划部底表-户外地垫.xlsx');
 const PP_FORECAST_REFERENCE_PATH = path.resolve(ROOT, '新增参考的材料和内容/PP管数据-plastic-2025年-2026年.xlsx');
 

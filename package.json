@@ -13,12 +13,15 @@
     "audit:competitor": "node tests/competitor_audit.js",
     "audit:plan-reference": "node tests/plan_reference_audit.js",
     "test:overwrite": "node tests/overwrite_guard.js",
-    "test:analysis": "node src/analyze_market.js && node tests/analysis_audit.js && node src/build_spec2_html.mjs && node tests/spec2_audit.mjs",
-    "test": "npm run verify && npm run audit && npm run audit:competitor && npm run audit:plan-reference && npm run test:analysis && npm run test:frontend && npm run test:overwrite",
-    "analyze": "node src/analyze_market.js",
+    "test:analysis": "node tests/spec21_model_audit.mjs && node tests/spec2_audit.mjs",
+    "build:delivery": "node src/build_delivery.mjs",
+    "test": "node tests/spec21_checks.mjs",
+    "test:inputs": "node tests/spec21_checks.mjs --inputs",
+    "analyze": "node src/build_delivery.mjs",
+    "analyze:legacy": "node src/analyze_market.js",
     "analyze:spec2": "node src/build_spec2_html.mjs",
     "poc": "node sandbox/test_xlsx.js",
-    "test:frontend": "node tests/frontend_audit.js"
+    "test:frontend": "node tests/spec21_checks.mjs --delivery"
   },
   "dependencies": {
     "xlsx": "^0.18.5",

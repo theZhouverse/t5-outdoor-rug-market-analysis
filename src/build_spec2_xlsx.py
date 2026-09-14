@@ -1,3 +1,4 @@
+raise SystemExit('旧SPEC2缓存型构建器已停用。请执行 node src/build_delivery.mjs 生成SPEC2.1完整公式交付。')
 import hashlib,json,math,os,zipfile
 import xlsxwriter
 ROOT=os.path.abspath(os.path.join(os.path.dirname(__file__),'..')); DATA_JSON=os.path.join(ROOT,'tmp','formula_market_builder','spec2_dataset.json'); SOURCE=os.path.join(ROOT,'data','raw','地垫-卖家精灵市场数据.xlsx'); OUT_DIR=os.path.join(ROOT,'outputs','20260911-spec2-market-analysis'); OUT_FILE=os.environ.get('SPEC2_XLSX_OUT',os.path.join(OUT_DIR,'户外地垫市场分析-SPEC2-可回勾版.xlsx')); os.makedirs(os.path.dirname(OUT_FILE),exist_ok=True)

@@ -1,0 +1,21 @@
+{
+  "specVersion": "2.1",
+  "sourceSha256": "9ced3b100ece7d441b45ce8a1bd0eb9d3470854a832f071b02ecc2c6f91f5fac",
+  "sourceRows": 73810,
+  "listingMonthRows": 63554,
+  "changedRepresentatives": 274,
+  "restoredEligibleListingMonthsAfterRemovingCap": 399,
+  "savedFormulaCount": 2196411,
+  "savedAuditChecks": 4111484,
+  "savedAuditErrors": 0,
+  "independentFormulaComparisons": 1911423,
+  "independentFormulaMismatches": 0,
+  "inputPerturbationAssertions": 440,
+  "artifactCompatibilityCases": 8,
+  "html": {"navGroups": 5, "collapsibleSubsections": 31, "interactiveCharts": 26, "browserErrors": []},
+  "nativeExcelFullRecalculation": "not_run",
+  "latestMonth": "202607",
+  "latestOverall": {"listingMonth": 407, "sales": 333653, "revenue": 17049975, "top100Listing": 111},
+  "latestGenimoPP": {"listingMonth": 5, "sales": 43691, "revenue": 1047486},
+  "regression202509": {"bsrCandidateRows": 114, "dedupListings": 96, "titlePlasticRows": 65}
+}

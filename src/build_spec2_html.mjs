@@ -48,11 +48,18 @@ function decodeXml(value) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi,(_,n)=>String.fromCodePoint(parseInt(n,16)));
 }
 
 function display(cell) {
   if (!cell) return '';
+  // Rich text is the actual cell content; hyperlink display can contain only
+  // its first run (100 Rugs.com titles in the supplied source).
+  if (cell.r !== null && cell.r !== undefined) {
+    const rich=decodeXml(cell.r);
+    if(clean(rich)) return rich;
+  }
   if (cell.v !== null && cell.v !== undefined && clean(cell.v) !== '') return String(cell.v);
   if (cell.l && cell.l.display !== null && cell.l.display !== undefined && clean(cell.l.display) !== '') {
     return String(cell.l.display);
@@ -91,13 +98,13 @@ function parseBsr(value) {
   if (!s) return null;
   // Accept integer ranks and integer-looking N.0 text. Do not split a
   // non-integer decimal such as 1.5 into the false ranks 1 and 5.
-  const matches = s.match(/(?<![\d.])\d+(?:\.0+)?(?![\d.])/g) || [];
-  const values = matches.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
+  const matches = s.match(/(?<![\d.\-−])[-−]?\s*\d+(?:\.0+)?(?![\d.])/g) || [];
+  const values = matches.map((v) => Number(v.replace(/\s/g,'').replace('−','-'))).filter((v) => Number.isInteger(v) && v > 0);
   return values.length ? Math.min(...values) : null;
 }
 
 function isPlasticTitle(value) {
-  return /(?:^|[^a-z])plastic(?:[^a-z]|$)/i.test(clean(value));
+  return /\bplastic\b/i.test(clean(value));
 }
 
 function isGenimo(value) {
@@ -182,6 +189,7 @@ function readRawRows() {
       if (!hasValue) continue;
       const row = {
         month,
+        sourceSheet: sheet.original,
         sourceRow: r + 1,
         asin: clean(values[idx.asin]),
         sku: clean(values[idx.sku]),
@@ -238,7 +246,7 @@ function representativeCompare(a, b) {
   const bc = (Number.isFinite(b.sales) ? 1 : 0) + (Number.isFinite(b.revenue) ? 1 : 0);
   if (ac !== bc) return bc - ac;
   if (Number.isFinite(a.price) !== Number.isFinite(b.price)) return Number.isFinite(b.price) - Number.isFinite(a.price);
-  return sourceId(a).localeCompare(sourceId(b));
+  return a.sourceRow - b.sourceRow;
 }
 
 function dedup(rows, flags) {
@@ -265,7 +273,7 @@ function dedup(rows, flags) {
 }
 
 function percent(current, previous) {
-  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null;
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous <= 0) return null;
   return (current - previous) / Math.abs(previous);
 }
 
@@ -330,6 +338,11 @@ function enrichTrend(months, rows) {
     return {
       month,
       ...current,
+      comparisonMonth: previousYear(month),
+      comparisonCount: mom.count ?? null,
+      comparisonSales: mom.sales ?? null,
+      comparisonRevenue: mom.revenue ?? null,
+      quality: current.count === 0 ? '无样本' : ((current.salesCoverage < .95 || current.revenueCoverage < .95 || Math.abs(percent(current.count, mom.count) ?? 0) > .3 || Math.abs(percent(current.count, base.get(previousMonth(month))?.count) ?? 0) > .3) ? '可比性受限' : '覆盖可用'),
       momSales: percent(current.sales, mom.sales),
       momRevenue: percent(current.revenue, mom.revenue),
       momAvgPrice: percent(current.avgPrice, mom.avgPrice),
@@ -345,25 +358,28 @@ function annualRows(months, rows) {
     if (!byYear.has(year)) byYear.set(year, []);
     byYear.get(year).push(row);
   }
-  const years = Array.from(byYear.keys()).sort();
-  const summaries = years.map((year) => ({ year, ...summarise(byYear.get(year)) }));
+  const years = [...new Set(months.map(m => m.slice(0, 4)))].sort();
+  const summaries = years.map((year) => ({ year, ...summarise(byYear.get(year) || []) }));
   return summaries.map((current, i) => {
-    const previous = summaries[i - 1] || {};
-    const previousYear = previous.year;
-    const currentMonths = new Set(byYear.get(current.year).map((row) => row.month.slice(4, 6)));
-    const previousMonths = previousYear ? new Set(byYear.get(previousYear).map((row) => row.month.slice(4, 6))) : new Set();
+    const previousYear = String(Number(current.year) - 1);
+    const currentMonths = new Set(months.filter(m => m.startsWith(current.year)).map(m => m.slice(4)));
+    const previousMonths = new Set(months.filter(m => m.startsWith(previousYear)).map(m => m.slice(4)));
     const commonMonths = Array.from(currentMonths).filter((month) => previousMonths.has(month)).sort();
     const currentComparable = commonMonths.length
-      ? summarise(byYear.get(current.year).filter((row) => commonMonths.includes(row.month.slice(4, 6))))
+      ? summarise((byYear.get(current.year) || []).filter((row) => commonMonths.includes(row.month.slice(4, 6))))
       : {};
     const previousComparable = commonMonths.length
-      ? summarise(byYear.get(previousYear).filter((row) => commonMonths.includes(row.month.slice(4, 6))))
+      ? summarise((byYear.get(previousYear) || []).filter((row) => commonMonths.includes(row.month.slice(4, 6))))
       : {};
     const yoyPeriod = previousYear && commonMonths.length
-      ? previousYear + '.' + Number(commonMonths[0]) + '—' + current.year + '.' + Number(commonMonths[commonMonths.length - 1])
+      ? current.year + ' [' + commonMonths.join(',') + '] 对 ' + previousYear + ' [' + commonMonths.join(',') + ']'
       : null;
     return {
       ...current,
+      coverage: [...currentMonths].join(','),
+      commonMonths,
+      currentComparable,
+      previousComparable,
       yoySales: percent(currentComparable.sales, previousComparable.sales),
       yoyRevenue: percent(currentComparable.revenue, previousComparable.revenue),
       yoyPeriod
@@ -401,7 +417,8 @@ function buildCategory(title, fullRows, topRows, candidateRows = []) {
     annual: annualRows(MONTHS, fullRows),
     topAnnual: annualRows(MONTHS, topRows),
     tiers: Object.fromEntries(BANDS.map((band) => [band.key, enrichTrend(MONTHS, tierRows[band.key])])),
-    fine: Object.fromEntries(FINE_BANDS.map((band) => [band.key, enrichTrend(MONTHS, fineRows[band.key])]))
+    fine: Object.fromEntries(FINE_BANDS.map((band) => [band.key, enrichTrend(MONTHS, fineRows[band.key])])),
+    annualBands: Object.fromEntries([...BANDS, ...FINE_BANDS].map(band => [band.key, annualRows(MONTHS, filterBand(topRows, band))]))
   };
 }
 
@@ -450,13 +467,14 @@ function svgBarChart(title, rows, field, color, digits) {
     body += '<text x="8" y="' + (y + 4).toFixed(1) + '" class="axis-label">' + esc(fmt(chartMax * ratio, digits)) + '</text>';
   }
   rows.forEach((row, i) => {
+    if (!Number.isFinite(row[field])) return;
     const value = values[i];
     const h = max > 0 ? (value / chartMax) * plotH : 0;
     const x = left + i * (plotW / Math.max(rows.length, 1)) + 1;
     const y = height - bottom - h;
     const label = chartMonthLabel(row.month);
     const valueLabel = chartValueLabel(row[field], false, digits);
-    const tooltip = label + '  ·  ' + valueLabel;
+    const tooltip = label + '  ·  ' + valueLabel + (field==='revenue'?' 美元':' 件') + (row.quality?' · '+row.quality:'');
     const cx = x + barW / 2;
     body += '<rect class="chart-mark chart-bar" data-chart-point data-chart-index="' + i + '" data-x="' + cx.toFixed(1) + '" data-label="' + esc(label) + '" data-tooltip="' + esc(tooltip) + '" tabindex="0" role="img" aria-label="' + esc(tooltip) + '" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="2" fill="' + color + '"><title>' + esc(tooltip) + '</title></rect>';
     if (i % Math.max(1, Math.ceil(rows.length / 10)) === 0) {
@@ -578,9 +596,11 @@ function trendTable(data, topData, candidateData) {
     fmtPct(r.momSales),
     fmtPct(r.momRevenue),
     fmt(candidateData[i] ? candidateData[i].rawCount : null),
-    fmt(topData[i] ? topData[i].count : null)
+    fmt(topData[i] ? topData[i].count : null),
+    fmt(r.count-r.missingSales),fmt(r.count-r.missingRevenue),fmt(r.count-r.missingPrice),
+    fmt(r.comparisonCount),r.quality
   ]);
-  return table(['月份', '整体商品数（去重Listing）', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', 'BSR前100原始候选行数', 'BSR前100去重Listing数'], rows);
+  return table(['月份', '整体商品数（去重Listing）', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', 'BSR前100原始候选行数', 'BSR前100去重Listing数','销量有效数','金额有效数','价格有效数','去年同月Listing数','可比性'], rows);
 }
 
 function topTrendTable(data, candidateData) {
@@ -593,9 +613,9 @@ function topTrendTable(data, candidateData) {
     fmt(r.pairedAsp, 2),
     fmtPct(r.momSales),
     fmtPct(r.momRevenue),
-    fmt(candidateData[i] ? candidateData[i].rawCount : null)
+    fmt(candidateData[i] ? candidateData[i].rawCount : null),fmt(candidateData[i]?.count),fmt(candidateData[i] ? Math.max(0,candidateData[i].count-r.count) : null),r.count<100?'少于100个样本':r.count>100?'超过100；并列或多小类':'100个样本',r.quality
   ]);
-  return table(['月份', 'Top100去重Listing数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', '原始候选行数'], rows);
+  return table(['月份', 'Top100去重Listing数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', '原始候选行数','候选去重数','候选未入数（应为0）','样本状态','可比性'], rows);
 }
 
 function annualTable(data, topData, prefix = '整体') {
@@ -613,10 +633,10 @@ function annualTable(data, topData, prefix = '整体') {
       fmt(top.sales),
       fmt(top.revenue, 2),
       fmtPct(top.yoySales),
-      fmtPct(top.yoyRevenue)
+      fmtPct(top.yoyRevenue),r.coverage,r.yoyPeriod || '无共同基期',fmt(r.currentComparable?.sales),fmt(r.previousComparable?.sales),fmt(r.currentComparable?.revenue,2),fmt(r.previousComparable?.revenue,2)
     ];
   });
-  return table(['年份', prefix + '商品数', prefix + '销量', prefix + '销售额($)', prefix + '平均标价($)', prefix + '销量YOY', prefix + '销售额YOY', 'Top100商品数', 'Top100销量', 'Top100销售额($)', 'Top100销量YOY', 'Top100销售额YOY'], rows);
+  return table(['年份', prefix + 'Listing月次', prefix + '销量', prefix + '销售额($)', prefix + '平均标价($)', prefix + '销量YOY', prefix + '销售额YOY', 'Top100 Listing月次', 'Top100销量', 'Top100销售额($)', 'Top100销量YOY', 'Top100销售额YOY','本期覆盖月份','YOY比较期间','同比本期销量','同比基期销量','同比本期金额($)','同比基期金额($)'], rows);
 }
 
 function tierTable(data, title) {
@@ -644,7 +664,24 @@ function narrative(category, overall, pp, nonpp) {
     pieces.push('整体市场按完整单词 plastic 划分为 PP 与高客单价市场，两者并集构成整体市场；最新月 PP 销量为 ' + fmt(p.sales) + '，高客单价市场销量为 ' + fmt(n.sales) + '，请结合覆盖率和缺失值复核方向。');
   }
   pieces.push('原始销量覆盖率 ' + fmtPct(latest.salesCoverage) + '，销售额覆盖率 ' + fmtPct(latest.revenueCoverage) + '；空值保留为空，不把缺失当作零。');
+  pieces.push('可比性：'+latest.quality+'；本月 '+fmt(latest.count)+' 个Listing，去年同月 '+fmt(latest.comparisonCount)+' 个。样本变化超过30%或销售字段覆盖不足95%会提示复核，阈值是审查政策，不是市场事实。');
+  pieces.push('配对成交均价 $'+fmt(latest.pairedAsp,2)+'，去年同月变化 '+fmtPct(latest.momPairedAsp)+'；该价格来自同月有有效销量及金额的样本，不能据此认定同款涨价。Top100销量占整体盘 '+fmtPct(Number.isFinite(top.sales)&&latest.sales>0?top.sales/latest.sales:null)+'。');
+  const year=category.annual.at(-1);
+  pieces.push('最近年度共同周期 '+(year.yoyPeriod || '无共同基期')+'：销量 '+fmt(year.previousComparable?.sales)+' → '+fmt(year.currentComparable?.sales)+'（'+fmtPct(year.yoySales)+'）；金额 $'+fmt(year.previousComparable?.revenue,2)+' → $'+fmt(year.currentComparable?.revenue,2)+'（'+fmtPct(year.yoyRevenue)+'）。未完结年度不与去年全年直接比较。');
+  const efficiencies=BANDS.map(b=>{const x=category.annualBands[b.key].at(-1);return {b,x,eff:x.count>0&&Number.isFinite(x.sales)?x.sales/x.count:null};});
+  for(const {b,x,eff} of efficiencies) pieces.push('核心期 '+year.year+' ['+year.coverage+'] '+b.name+'：销量 '+fmt(x.sales)+'，'+fmt(x.count)+' Listing月次，单Listing月次销量 '+fmt(eff,2)+'；同周期销量YOY '+fmtPct(x.yoySales)+'。');
+  const best=efficiencies.filter(x=>Number.isFinite(x.eff)).sort((a,b)=>b.eff-a.eff)[0];
+  pieces.push(best?'建议：优先检查 '+best.b.name+' 现有链接的销售效率和榜单保留情况，再小批验证候选产品；高效率不证明容易进入该排名。若连续两个月金额、份额与BSR同步改善再考虑增加链接；可比性受限时先核验源样本。':'建议：没有足够分层样本，不给出确定的扩量层级。');
+  if(category.marketStrategy) pieces.push(...category.marketStrategy);
   return pieces;
+}
+
+function annualBandTable(category){
+  return table(['年份','层级','Listing月次','销量','销售额($)','标价($)','成交均价($)','销量YOY','销售额YOY','覆盖月份','比较期间','本期可比销量','基期可比销量','本期可比金额($)','基期可比金额($)'], [...BANDS,...FINE_BANDS].flatMap(b=>category.annualBands[b.key].map(r=>[r.year,b.name,fmt(r.count),fmt(r.sales),fmt(r.revenue,2),fmt(r.avgPrice,2),fmt(r.pairedAsp,2),fmtPct(r.yoySales),fmtPct(r.yoyRevenue),r.coverage,r.yoyPeriod || '无共同基期',fmt(r.currentComparable?.sales),fmt(r.previousComparable?.sales),fmt(r.currentComparable?.revenue,2),fmt(r.previousComparable?.revenue,2)])));
+}
+
+function compositionTable(category){
+  return '<h4>整体Top100内部组成（同一主池，可相加）</h4>'+table(['月份','整体数量','榜内PP数量','榜内高客单价数量','整体销量','榜内PP销量','榜内高客单价销量','整体金额($)','榜内PP金额($)','榜内高客单价金额($)'],category.composition.map(r=>[r.month,...['count','sales','revenue'].flatMap(k=>['overall','pp','high'].map(s=>fmt(r[s][k],k==='revenue'?2:0)))]));
 }
 
 function marketSection(id, number, category, overall, pp, nonpp) {
@@ -663,12 +700,13 @@ function marketSection(id, number, category, overall, pp, nonpp) {
   });
   let out = '<section id="' + id + '"><h2>' + number + '｜' + esc(category.title) + '</h2>';
   out += '<p class="lead">本部分按“整体盘 → BSR Top100 → 头部/中部/尾部 → 五档 → 文字分析”展开。月度 MOM 为本月与去年同月比较，年度 YOY 为本年与上一年度比较。</p>';
+  out += '<p class="scope-notice">最新月：'+esc(latest.quality)+'。这是一份原始导出样本的分析；样本变化可能影响增长率，表格保留两期数量与覆盖率。</p>';
   out += '<div class="cards"><div class="card"><b>最新月整体销量</b><strong>' + fmt(latest.sales) + '</strong><small>' + esc(latest.month) + '</small></div>';
   out += '<div class="card"><b>最新月整体销售额</b><strong>$' + fmt(latest.revenue, 2) + '</strong><small>原始月销售额合计</small></div>';
   out += '<div class="card"><b>最新月 Top100 销量</b><strong>' + fmt(topLatest.sales) + '</strong><small>' + fmt(topLatest.count) + ' 个 Listing</small></div>';
   out += '<div class="card"><b>最新月平均标价</b><strong>$' + fmt(latest.avgPrice, 2) + '</strong><small>按有价格记录算术平均</small></div></div>';
   out += subsection(id + '-1-1', sectionNo + '.1 月度汇总与可回勾数据', trendTable(category.monthly, category.topMonthly, category.topCandidateMonthly));
-  out += subsection(id + '-1-2', sectionNo + '.2 BSR Top100 月度明细', topTrendTable(category.topMonthly, category.topCandidateMonthly));
+  out += subsection(id + '-1-2', sectionNo + '.2 BSR Top100 月度明细', topTrendTable(category.topMonthly, category.topCandidateMonthly)+(category.composition?compositionTable(category):''));
   out += subsection(id + '-1-3', sectionNo + '.3 年度 YOY 汇总', annualTable(category.annual, category.topAnnual));
   let charts = '<div class="charts">' + svgBarChart(category.title + '月销量', category.monthly, 'sales', '#2563eb', 0);
   charts += svgBarChart(category.title + '月销售额', category.monthly, 'revenue', '#0f766e', 2);
@@ -680,7 +718,8 @@ function marketSection(id, number, category, overall, pp, nonpp) {
   rankCharts += svgLineChart(category.title + ' Top100 头/中/尾销量MOM', tierCombined, BANDS.map((band, i) => ({ name: band.name, field: 'mom_' + band.key, color: ['#2563eb', '#059669', '#f97316'][i] })), true) + '</div>';
   out += subsection(id + '-1-5', sectionNo + '.5 BSR Top100 五档与头中尾 MOM', rankCharts);
   let tierBody = '';
-  for (const band of BANDS) tierBody += tierTable(category.tiers[band.key], band.name);
+  for (const band of [...BANDS,...FINE_BANDS]) tierBody += tierTable((category.tiers[band.key] || category.fine[band.key]), band.name);
+  tierBody += '<h4>年度同周期分层</h4>'+annualBandTable(category);
   out += subsection(id + '-1-6', sectionNo + '.6 头部 / 中部 / 尾部明细', tierBody);
   const analysisItems = narrative(category, overall, pp, nonpp).map((paragraph) => '<li>' + esc(paragraph) + '</li>').join('');
   out += subsection(id + '-1-7', sectionNo + '.7 数据驱动文字分析', '<div class="analysis"><ul class="analysis-list">' + analysisItems + '</ul></div>');
@@ -729,12 +768,15 @@ function genimoSection(category, overall, pp, genimoPP) {
   out += subsection('genimo-4-2', '4.2 GENIMO 在 PP 市场中的表现', ppBody);
   let genimoCharts = '<div class="charts">' + svgBarChart('GENIMO 月销量', category.monthly, 'sales', '#9333ea', 0);
   genimoCharts += svgBarChart('GENIMO 月销售额', category.monthly, 'revenue', '#c026d3', 2);
+  genimoCharts += svgLineChart('GENIMO平均标价',category.monthly,[{name:'平均标价($)',field:'avgPrice',color:'#9333ea'}]);
   genimoCharts += svgLineChart('GENIMO 销量MOM（去年同月）', category.monthly, [{ name: '销量MOM', field: 'momSales', color: '#2563eb' }], true) + '</div>';
   out += subsection('genimo-4-3', '4.3 GENIMO 趋势图', genimoCharts);
-  let genimoTierBody = '';
-  for (const band of BANDS) genimoTierBody += tierTable(category.tiers[band.key], 'GENIMO ' + band.name);
+  let genimoTierBody = '<h4>整体Top100内GENIMO（主视角）</h4>'+topTrendTable(category.topMonthly,category.topCandidateMonthly);
+  genimoTierBody += '<h4>补充：GENIMO品牌BSR范围回勾（取消额外截断后应与主池一致）</h4>'+topTrendTable(category.independentTopMonthly,category.topCandidateMonthly);
+  for (const band of [...BANDS,...FINE_BANDS]) genimoTierBody += tierTable(category.tiers[band.key] || category.fine[band.key], 'GENIMO ' + band.name);
+  for(const bs of [BANDS,FINE_BANDS]){const combined=MONTHS.map((month,i)=>({month,...Object.fromEntries(bs.map(b=>[b.key,(category.tiers[b.key]||category.fine[b.key])[i].momSales]))}));genimoTierBody+=svgLineChart('GENIMO整体榜内分层销量MOM',combined,bs.map((b,i)=>({name:b.name,field:b.key,color:['#2563eb','#059669','#f97316','#9333ea','#dc2626'][i]})),true);}
   out += subsection('genimo-4-4', '4.4 GENIMO BSR 头中尾与五档', genimoTierBody);
-  out += subsection('genimo-4-5', '4.5 GENIMO 年度 YOY', annualTable(category.annual, category.topAnnual));
+  out += subsection('genimo-4-5', '4.5 GENIMO 年度 YOY 与分层', annualTable(category.annual, category.topAnnual)+annualBandTable(category));
   const latest = lastNonEmpty(category.monthly);
   const latestTop = category.topMonthly.find((r) => r.month === latest.month) || {};
   const advice = [
@@ -742,7 +784,10 @@ function genimoSection(category, overall, pp, genimoPP) {
     '用整体市场份额和 PP/高客单价市场拆分制定资源优先级：当 GENIMO 在某一市场的销量或销售额占比连续上升时，优先补充该市场相同字段完整且 BSR 可追踪的链接；当份额下降时，先核对缺失销量、销售额、价格和 BSR 的覆盖率，再决定是否调整产品组合。',
     '建立月度复盘表：销量、销售额、平均标价、销量MOM、销售额MOM、Top100数量、头中尾占比和标题中 plastic 标记必须同批次留痕。报告只使用原始工作簿已有字段，不推导利润、成本、广告或库存指标。'
   ].map((item) => '<li>' + esc(item) + '</li>').join('');
-  out += subsection('genimo-4-6', '4.6 2027 年建议（仅基于当前原始字段）', '<div class="analysis"><ul class="analysis-list">' + advice + '</ul></div>');
+  const evidence=narrative(category,overall,pp,null).map(t=>'<li>'+esc(t)+'</li>').join('');
+  const planRows=BANDS.map(b=>{const r=category.annualBands[b.key].at(-1);const total=category.topAnnual.at(-1);return [b.name,fmt(r.sales),fmt(r.count),fmt(r.count>0?r.sales/r.count:null,2),fmtPct(total.sales>0?r.sales/total.sales:null),fmt(r.avgPrice,2),'待输入总链接数'];});
+  out += subsection('genimo-4-6', '4.6 2027 年建议（仅基于当前原始字段）', '<div class="analysis"><ul class="analysis-list">' + evidence + advice + '<li>新增链接总量在XLSX 08页B3输入，默认空；按上表最近年度核心期品牌榜内销量权重分配，前两档向下取整、尾档取余。是资源分配情景，不是销量预测。</li><li>花型、颜色和尺寸尚未可靠提取，不能据此建议具体花型；不推导利润、广告或库存。</li></ul></div>'+table(['目标BSR层级','核心期销量','Listing月次','单Listing月次销量','分配权重','历史标价($)','新增链接数'],planRows));
+  out += subsection('genimo-4-7','4.7 整体Top100内GENIMO进留退', '<p>比较相邻自然月榜内Listing集合；进入/退出不等于上新/下架。</p>'+table(['月份','基期月份','当前','基期','进入','保留','退出'],category.movements.map(r=>[r.month,r.previous,...['current','prior','entered','retained','exited'].map(k=>fmt(r[k]))]))+table(['月份','Listing键','基期BSR','本期BSR','状态'],category.movements.flatMap(r=>r.details.map(x=>[r.month,x.key,fmt(x.previousRank),fmt(x.currentRank),x.state]))));
   out += '</section>';
   return out;
 }
@@ -821,7 +866,8 @@ function buildHtml(raw, categories) {
     ['genimo-4-3', '4.3 GENIMO 趋势图'],
     ['genimo-4-4', '4.4 GENIMO BSR 头中尾与五档'],
     ['genimo-4-5', '4.5 GENIMO 年度 YOY'],
-    ['genimo-4-6', '4.6 2027 年建议']
+    ['genimo-4-6', '4.6 2027 年建议'],
+    ['genimo-4-7', '4.7 品牌进留退']
   ]);
   let html = '<!doctype html><html lang="zh-CN" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>户外地垫市场洞察 · Outdoor Rug Intelligence</title><style>' + UI_CSS + compatibilityCss + '</style></head><body><div class="app-shell">';
   html += '<aside class="sidebar"><div class="brand"><div class="brand-mark"></div><div><strong>Market Intelligence</strong><small>户外地垫市场分析系统</small></div></div><div class="local-badge"><i></i> DATA · VERIFIED</div><span class="nav-label">市场分析</span><nav>' + nav + '</nav><div class="sidebar-footer"><span>可比数据范围</span><strong>' + esc(MONTHS[0]) + ' — ' + esc(MONTHS[MONTHS.length - 1]) + '</strong><small>' + fmt(MONTHS.length) + '个月 · 原始主源直读</small></div></aside>';
@@ -867,6 +913,7 @@ function metricEqual(a, b) {
 }
 
 function buildDataset() {
+  MONTHS.length = 0;
   const raw = readRawRows();
   const flags = buildFamilyFlags(raw.rows);
   const fullDedup = dedup(raw.rows, flags);
@@ -875,10 +922,8 @@ function buildDataset() {
   // pool. This keeps the implementation aligned with SPEC 2.0 and makes the
   // candidate-row count independently auditable against the source sheet.
   const topCandidateDedup = dedup(topCandidates, flags);
-  // Keep a deterministic maximum of 100 listings per month and scope. A
-  // source export can contain tied BSR values, so filtering rank <= 100 alone
-  // can produce more than 100 listings. Rank is the primary order; the stable
-  // family key and source row make ties reproducible for manual rechecks.
+  // The user requested a numeric BSR range, not a second 100-row truncation.
+  // Retain every eligible Listing, including tied/multiple-category ranks.
   const selectTop100 = (rows) => {
     const byMonth = new Map();
     for (const row of rows) {
@@ -889,7 +934,7 @@ function buildDataset() {
     return MONTHS.flatMap((month) => (byMonth.get(month) || [])
       .slice()
       .sort((a, b) => a.rank - b.rank || a.familyKey.localeCompare(b.familyKey) || a.sourceRow - b.sourceRow)
-      .slice(0, 100));
+      );
   };
   const topDedup = selectTop100(topCandidateDedup);
   const ppRows = fullDedup.filter((r) => r.plastic);
@@ -904,8 +949,11 @@ function buildDataset() {
     overall: buildCategory('整体市场', fullDedup, topDedup, topCandidateDedup),
     pp: buildCategory('PP市场', ppRows, selectTop100(ppTopCandidates), ppTopCandidates),
     nonpp: buildCategory('高客单价市场', nonppRows, selectTop100(nonppTopCandidates), nonppTopCandidates),
-    genimo: buildCategory('GENIMO品牌', genimoRows, selectTop100(genimoTopCandidates), genimoTopCandidates),
-    genimoPP: buildCategory('GENIMO PP市场', genimoPPRows, selectTop100(genimoPPTopCandidates), genimoPPTopCandidates)
+    genimo: buildCategory('GENIMO品牌', genimoRows, topDedup.filter(r => r.genimo), genimoTopCandidates),
+    genimoPP: buildCategory('GENIMO PP市场', genimoPPRows, topDedup.filter(r => r.genimo && r.plastic), genimoPPTopCandidates),
+    globalPP: buildCategory('整体Top100内PP', topDedup.filter(r => r.plastic), topDedup.filter(r => r.plastic), ppTopCandidates),
+    globalHigh: buildCategory('整体Top100内高客单价', topDedup.filter(r => !r.plastic), topDedup.filter(r => !r.plastic), nonppTopCandidates),
+    genimoIndependent: buildCategory('GENIMO品牌BSR范围回勾', genimoRows, selectTop100(genimoTopCandidates), genimoTopCandidates)
   };
   for (let i = 0; i < MONTHS.length; i += 1) {
     const overallMonth = categories.overall.monthly[i];
@@ -920,7 +968,38 @@ function buildDataset() {
     }
   }
   if (!raw.rows.some((row) => row.rank === 100)) throw new Error('原始主源没有检测到 BSR=100，无法确认包含100');
-  return { raw, fullDedup, topCandidates, topCandidateDedup, topDedup, categories };
+  const movements = MONTHS.map(month => {
+    const previous = previousMonth(month);
+    const currentRows = categories.genimo.topRows.filter(r => r.month === month);
+    const priorRows = categories.genimo.topRows.filter(r => r.month === previous);
+    const before = new Map(priorRows.map(r => [listingKey(r), r]));
+    const after = new Map(currentRows.map(r => [listingKey(r), r]));
+    const available = MONTHS.includes(previous);
+    const details = [...new Set([...before.keys(), ...after.keys()])].sort().map(key => ({key, previousRank: before.get(key)?.rank ?? null, currentRank: after.get(key)?.rank ?? null, state: !available ? '无基期' : before.has(key) ? (after.has(key) ? '保留' : '退出') : '进入'}));
+    return {month, previous, available, current:after.size, prior:available ? before.size : null, entered:available ? details.filter(r => r.state === '进入').length : null, retained:available ? details.filter(r => r.state === '保留').length : null, exited:available ? details.filter(r => r.state === '退出').length : null, details};
+  });
+  const metadata={specVersion:'2.1',sourceSha256:SOURCE_HASH,generatedAt:new Date().toISOString(),batchId:'spec21-'+SOURCE_HASH.slice(0,12),latestMonth:MONTHS.at(-1)};
+  categories.genimo.movements=movements;
+  categories.genimo.independentTopMonthly=categories.genimoIndependent.topMonthly;
+  categories.overall.composition=MONTHS.map((month,i)=>({month,overall:categories.overall.topMonthly[i],pp:categories.globalPP.topMonthly[i],high:categories.globalHigh.topMonthly[i]}));
+  categories.overall.metadata=metadata;
+  const py=categories.pp.annual.at(-1),hy=categories.nonpp.annual.at(-1),gy=categories.genimo.annual.at(-1),gpy=categories.genimoPP.annual.at(-1);
+  const share=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b>0?a/b:null;
+  const target=Number.isFinite(py.yoyRevenue)&&Number.isFinite(hy.yoyRevenue)?(py.yoyRevenue>=hy.yoyRevenue?'PP':'高客单价'):null;
+  categories.genimo.marketStrategy=[
+    '市场选择证据：'+py.yoyPeriod+'，PP金额YOY '+fmtPct(py.yoyRevenue)+'，高客单价金额YOY '+fmtPct(hy.yoyRevenue)+'；GENIMO在PP内的金额份额 '+fmtPct(share(gpy.previousComparable.revenue,py.previousComparable.revenue))+' → '+fmtPct(share(gpy.currentComparable.revenue,py.currentComparable.revenue))+'。',
+    target?'2027建议：先核验 '+target+' 市场，再作为小批测款的优先候选，其同周期金额变化相对更强；现有PP品牌盘应单独跟踪份额，不能因为另一个市场相对更强就直接迁移全部链接。确认样本可比后，用连续两个月份额、金额与BSR变化决定追加或收缩。':'2027建议：比较期证据不足，暂不指定优先市场。'
+  ];
+  for(const cat of Object.values(categories)) {
+    for(const collection of [cat.monthly,cat.topMonthly,...Object.values(cat.tiers),...Object.values(cat.fine)]) for(const r of collection){
+      const current=raw.sheetStats.find(s=>s.month===r.month)?.rowCount;
+      const priorYear=raw.sheetStats.find(s=>s.month===previousYear(r.month))?.rowCount;
+      const priorMonth=raw.sheetStats.find(s=>s.month===previousMonth(r.month))?.rowCount;
+      r.rawCount=current;r.rawPreviousYearCount=priorYear ?? null;
+      if(r.count && (Math.abs(percent(current,priorYear) ?? 0)>.3 || Math.abs(percent(current,priorMonth) ?? 0)>.3)) r.quality='可比性受限';
+    }
+  }
+  return { raw, fullDedup, topCandidates, topCandidateDedup, topDedup, categories, movements, metadata };
 }
 
 function runHtmlBuild() {
@@ -951,6 +1030,12 @@ export {
   SOURCE_HASH,
   buildCategory,
   buildDataset,
+  buildHtml,
+  annualRows,
+  representativeCompare,
+  isPlasticTitle,
+  summarise,
+  narrative,
   clean,
   dedup,
   display,
@@ -963,4 +1048,7 @@ export {
   previousYear
 };
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) runHtmlBuild();
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const {buildDelivery}=await import('./build_delivery.mjs');
+  await buildDelivery();
+}
