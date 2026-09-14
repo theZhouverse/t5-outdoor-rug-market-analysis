@@ -123,7 +123,7 @@ def periodvals(scope,m,level):
  return v
 commonheaders=['月份','Listing数','销量','销售额($)','平均标价($)','加权成交均价($)','销量MOM','销售额MOM']
 for scope,name in [('overall',names[1]),('pp',names[2]),('nonpp',names[3])]:
- sheet(name,cats[scope]['title']+' 月度汇总',commonheaders+['销量有效数','销售额有效数','价格有效数','BSR候选行数','BSR候选销量','BSR候选销售额($)','BSR候选标价($)','BSR候选成交均价($)','BSR候选销量MOM','BSR候选销售额MOM','可比性','BSR候选原始行数','候选父ASIN数','截去数','BSR候选样本状态','去年同月候选行数','去年同月销量','去年同月销售额($)'],
+ sheet(name,cats[scope]['title']+' 月度汇总',commonheaders+['销量有效数','销售额有效数','价格有效数','BSR候选行数','BSR候选销量','BSR候选销售额($)','BSR候选标价($)','BSR候选成交均价($)','BSR候选销量MOM','BSR候选销售额MOM','可比性','BSR候选原始行数','BSR候选行数（回勾）','截去数','BSR候选样本状态','去年同月候选行数','去年同月销量','去年同月销售额($)'],
  'MOM=本月/去年同月−1；非自然月环比。空白=无样本/无有效值/无正数基期。整体=PP+高客单价；原始销量为源估算值。业务池先筛1—100并保留每条候选行，不按父ASIN去重。')
  for n,m in enumerate(months,5):
   v=periodvals(scope,m,'全部');v += [link(scope,m,'全部',c) for c in ['L','M','I']];v+=periodvals(scope,m,'Top100')[1:];v +=[quality(scope,m,'全部')]+[link(scope,m,'Top100',c) for c in ['S','Q','R']]+[F(f'IF(L{n}<100,"少于100个样本",IF(L{n}>100,"超过100；并列或多小类","100个样本"))')]

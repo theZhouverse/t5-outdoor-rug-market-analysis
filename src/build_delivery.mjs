@@ -10,6 +10,11 @@ const PY=process.env.SPEC21_PYTHON || path.join(process.env.USERPROFILE || '', '
 function run(file){return new Promise((resolve,reject)=>{const p=spawn(PY,['-u',file],{cwd:ROOT,stdio:'inherit',windowsHide:true,env:{...process.env,PYTHONIOENCODING:'utf-8'}});p.on('error',reject);p.on('exit',code=>code===0?resolve():reject(new Error(file+' failed: '+code)));});}
 const mdTable=(headers,rows)=>['|'+headers.join('|')+'|','|'+headers.map(()=>'---').join('|')+'|',...rows.map(r=>'|'+r.map(v=>String(v ?? '—').replaceAll('|',' / ')).join('|')+'|')].join('\n');
 export function writeReports(d){
+ const workbook=process.env.SPEC21_WORKBOOK_PATH || 'outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-可回勾版.xlsx';
+ const workbookPath=path.isAbsolute(workbook)?workbook:path.join(ROOT,workbook);
+ if(fs.existsSync(workbookPath)){
+  Object.assign(d.metadata,{workbookFile:workbook,workbookSha256:crypto.createHash('sha256').update(fs.readFileSync(workbookPath)).digest('hex'),workbookBytes:fs.statSync(workbookPath).size});
+ }
  const publicData={metadata:d.metadata,months:[...MONTHS],sheetStats:d.raw.sheetStats,rawRowCount:d.raw.rows.length,bsrCandidateRowCount:d.mainPool.length,analysisPoolRowCount:d.mainPool.length,categories:{},movements:d.movements};
  // The public report exposes the four business parts and the GENIMO–PP
  // auxiliary view. Compatibility aliases used only by the workbook formula
@@ -18,7 +23,7 @@ export function writeReports(d){
  const base='交付/户外地垫市场分析';
  fs.mkdirSync('交付',{recursive:true});
  let html=buildHtml(d.raw,d.categories).replaceAll('SPEC 2.0','SPEC 2.1').replace('DATA · VERIFIED','DATA · SOURCE').replace('市场总览｜范围与数据口径','数据总览').replace('整体盘去重 Listing</span>','整体盘 Listing月次</span>').replace('BSR Top100 去重</span>','BSR Top100 Listing月次</span>').replace('GENIMO Listing</span>','GENIMO Listing月次</span>');
- html=html.replace('</head>','<script id="report-metadata" type="application/json">'+JSON.stringify(d.metadata).replaceAll('<','\\u003c')+'</script></head>');
+ html=html.replace('</head>','<script id="report-metadata" type="application/json">'+JSON.stringify(d.metadata).replaceAll('<','\\u003c')+'</script><script id="report-data" type="application/json">'+JSON.stringify(publicData).replaceAll('<','\\u003c')+'</script></head>');
  html=html.replace('原始字段只用于市场统计、筛选和回勾。','原始字段只用于市场统计、筛选和回勾。年度YOY仅取相邻年共同覆盖月份；BSR数值1—100筛选后保留全部候选行；PP与高客单价范围相加等于整体。');
  const preamble='# 户外地垫市场分析 SPEC 2.1\n\n'+Object.entries(d.metadata).map(([k,v])=>'- '+k+'：'+v).join('\n')+'\n\n统一处理顺序：BSR 1—100（含100）→ 保留每条候选源行，不按父ASIN去重 → 候选行标题/品牌分类；整体=PP+高客单价补集；GENIMO来自同一候选行池。月度MOM=本月/去年同月−1；年度YOY=相邻年共同月份。无有效值不补零。源估算不等于真实成交。\n';
  let md=preamble,quick=preamble;
@@ -32,7 +37,6 @@ export function writeReports(d){
  const planning='\n## 2027 规划使用方法\n\n- 在XLSX的08_2027规划与分析!B3输入非负整数新增链接总量。默认空，不生成虚假的计划数。\n- 权重按最近核心期GENIMO整体榜内头/中/尾销量比例；前两档向下取整，尾档取余；仅为分配情景。\n- 连续两个月金额、份额与BSR改善且样本覆盖稳定，再考虑扩充；覆盖受限先核验，退出榜单不等于下架。\n- 花型、尺寸、颜色尚未可靠提取，不据此编造趋势。仅使用给定源字段，不计算利润。\n';md+=planning;quick+=planning;
  const files={[base+'报告-优化版.html']:html,[base+'数据.json']:JSON.stringify(publicData,null,2),[base+'报告-优化版.md']:md,[base+'报告-极速版.md']:quick};
  for(const [f,content] of Object.entries(files))fs.writeFileSync(f,content,'utf8');
- const workbook=process.env.SPEC21_WORKBOOK_PATH || 'outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-可回勾版.xlsx';
  const manifest={...d.metadata,files:[...Object.keys(files),workbook].map(f=>({path:f,sha256:crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'),bytes:fs.statSync(f).size})),formulaAudit:JSON.parse(fs.readFileSync('tmp/spec21_formula_audit.json','utf8'))};
  fs.writeFileSync('交付/构建清单-SPEC2.1.json',JSON.stringify(manifest,null,2));
  console.log(JSON.stringify({delivered:manifest.files,formulaCount:manifest.formulaAudit.formulaCount},null,2));

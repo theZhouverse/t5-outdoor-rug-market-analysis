@@ -74,11 +74,17 @@ for r in range(5,1605):
 assert all(v=='通过' for k,v in public['93_数据校验'].items() if re.fullmatch(r'D\d+',k) and int(k[1:])>=5)
 for scope in ['01_整体市场月度','02_PP市场月度','03_高客单价市场月度']:assert public[scope]['G4']=='销量MOM'
 for scope in ['01_整体市场月度','02_PP市场月度','03_高客单价市场月度']:assert public[scope]['L4']=='BSR候选行数'
+for scope in ['01_整体市场月度','02_PP市场月度','03_高客单价市场月度']:assert public[scope]['U4']=='BSR候选行数（回勾）'
 assert public['05_年度YOY']['F4']=='Listing月次'
 assert public['08_2027规划与分析'].get('B3') is None
 for f in ['户外地垫市场分析报告-优化版.md','户外地垫市场分析报告-极速版.md','户外地垫市场分析报告-优化版.html']:
  text=(ROOT/'交付'/f).read_text(encoding='utf-8');assert D['metadata']['batchId'] in text;assert D['metadata']['generatedAt'] in text;assert 'market.db' not in text;assert 'replacementMetadata' not in text
 html=(ROOT/'交付/户外地垫市场分析报告-优化版.html').read_text(encoding='utf-8')
+assert 'id="report-data"' in html
+embedded=json.loads(re.search(r'<script id="report-data" type="application/json">(.*?)</script>',html,re.S).group(1))
+assert embedded==D
+assert '2026.07' in html and '2026.7' not in html
+assert 'BSR候选行数（回勾）' in html and '候选父ASIN数' not in html and '重复父ASIN行数' not in html
 ids=re.findall(r'\bid="([^"]+)"',html);assert len(ids)==len(set(ids));assert 'genimo-4-7' in ids
 for target in re.findall(r'href="#([^"]+)"',html):assert target in ids,target
 for no,scope in enumerate(['overall','pp','nonpp'],1):

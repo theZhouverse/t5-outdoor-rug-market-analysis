@@ -2,7 +2,7 @@
   "metadata": {
     "specVersion": "2.1",
     "sourceSha256": "62ffd074bca5299917d529bc033fdd01b9747ed6422d01177afb2b0c9b8a5701",
-    "generatedAt": "2026-09-14T08:24:39.504Z",
+    "generatedAt": "2026-09-14T10:18:32.508Z",
     "batchId": "spec21-62ffd074bca5",
     "latestMonth": "202607",
     "analysisOrder": "BSR 1-100 inclusive -> retain every candidate source row (no parent ASIN dedup) -> row title/brand classification",
@@ -14,7 +14,10 @@
     "analysisUnit": "BSR-qualified source row identified by month/sourceRow; ASIN and parent ASIN are audit-only",
     "parentAsinDedup": "not applied",
     "classificationRule": "candidate-row title complete-word plastic; candidate-row brand exact GENIMO",
-    "overallCompositionRule": "overall = PP + high-price complement within BSR candidate rows"
+    "overallCompositionRule": "overall = PP + high-price complement within BSR candidate rows",
+    "workbookFile": "outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-候选行版.xlsx",
+    "workbookSha256": "90426426edeea3e77095cbd357e05be5becc62dac7d8ce82a3f949d3c982f555",
+    "workbookBytes": 22259810
   },
   "months": [
     "202206",
@@ -18729,7 +18732,7 @@
       "metadata": {
         "specVersion": "2.1",
         "sourceSha256": "62ffd074bca5299917d529bc033fdd01b9747ed6422d01177afb2b0c9b8a5701",
-        "generatedAt": "2026-09-14T08:24:39.504Z",
+        "generatedAt": "2026-09-14T10:18:32.508Z",
         "batchId": "spec21-62ffd074bca5",
         "latestMonth": "202607",
         "analysisOrder": "BSR 1-100 inclusive -> retain every candidate source row (no parent ASIN dedup) -> row title/brand classification",
@@ -18741,7 +18744,10 @@
         "analysisUnit": "BSR-qualified source row identified by month/sourceRow; ASIN and parent ASIN are audit-only",
         "parentAsinDedup": "not applied",
         "classificationRule": "candidate-row title complete-word plastic; candidate-row brand exact GENIMO",
-        "overallCompositionRule": "overall = PP + high-price complement within BSR candidate rows"
+        "overallCompositionRule": "overall = PP + high-price complement within BSR candidate rows",
+        "workbookFile": "outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-候选行版.xlsx",
+        "workbookSha256": "90426426edeea3e77095cbd357e05be5becc62dac7d8ce82a3f949d3c982f555",
+        "workbookBytes": 22259810
       }
     },
     "pp": {

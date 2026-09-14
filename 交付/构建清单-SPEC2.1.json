@@ -1,7 +1,7 @@
 {
   "specVersion": "2.1",
   "sourceSha256": "62ffd074bca5299917d529bc033fdd01b9747ed6422d01177afb2b0c9b8a5701",
-  "generatedAt": "2026-09-14T08:24:39.504Z",
+  "generatedAt": "2026-09-14T10:18:32.508Z",
   "batchId": "spec21-62ffd074bca5",
   "latestMonth": "202607",
   "analysisOrder": "BSR 1-100 inclusive -> retain every candidate source row (no parent ASIN dedup) -> row title/brand classification",
@@ -14,31 +14,34 @@
   "parentAsinDedup": "not applied",
   "classificationRule": "candidate-row title complete-word plastic; candidate-row brand exact GENIMO",
   "overallCompositionRule": "overall = PP + high-price complement within BSR candidate rows",
+  "workbookFile": "outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-候选行版.xlsx",
+  "workbookSha256": "90426426edeea3e77095cbd357e05be5becc62dac7d8ce82a3f949d3c982f555",
+  "workbookBytes": 22259810,
   "files": [
     {
       "path": "交付/户外地垫市场分析报告-优化版.html",
-      "sha256": "57db683e4e79cb0104d7b89d67117df2813f9b38b7a80df750767dda71d4f358",
-      "bytes": 1301337
+      "sha256": "24791e4ccbcd16b3230f7c716240a335c85e8c06cb830afa5d60a1212c6bc721",
+      "bytes": 3189882
     },
     {
       "path": "交付/户外地垫市场分析数据.json",
-      "sha256": "059235f1430095351c7f929a1c2c9f3f1db72cdec43e9d14440ff46f9bca288c",
-      "bytes": 3270108
+      "sha256": "6f0976819a814fe6b5853e3cc83c24d293970fb0fc46f00a2073a464c6bfa506",
+      "bytes": 3270584
     },
     {
       "path": "交付/户外地垫市场分析报告-优化版.md",
-      "sha256": "6b3320920027ec13c7c1b02daf89bf7325dab4667df9909ee2892356b3bed5e8",
-      "bytes": 113568
+      "sha256": "702b4c2e97a9c3a811d77e4d7e931e327557ce47f10681d93161180b7beaff07",
+      "bytes": 113788
     },
     {
       "path": "交付/户外地垫市场分析报告-极速版.md",
-      "sha256": "6e5740ec9af8e59cb90ad55fb7ab9754ddb7c297b9f57b70893759de5cb7b706",
-      "bytes": 10026
+      "sha256": "d7a9ab80c2fa5e1743db8faf030f856061214b3ddacedf23f89b74d8ec608df4",
+      "bytes": 10246
     },
     {
       "path": "outputs/20260911-spec2-market-analysis/户外地垫市场分析-SPEC2-候选行版.xlsx",
-      "sha256": "909ef0df8cec99cb67c0d6d670402a291b7f91e8620184add7a68dea96d4ec03",
-      "bytes": 22259769
+      "sha256": "90426426edeea3e77095cbd357e05be5becc62dac7d8ce82a3f949d3c982f555",
+      "bytes": 22259810
     }
   ],
   "formulaAudit": {
@@ -50,7 +53,7 @@
     "metadata": {
       "specVersion": "2.1",
       "sourceSha256": "62ffd074bca5299917d529bc033fdd01b9747ed6422d01177afb2b0c9b8a5701",
-      "generatedAt": "2026-09-14T08:24:39.504Z",
+      "generatedAt": "2026-09-14T10:18:32.508Z",
       "batchId": "spec21-62ffd074bca5",
       "latestMonth": "202607",
       "analysisOrder": "BSR 1-100 inclusive -> retain every candidate source row (no parent ASIN dedup) -> row title/brand classification",

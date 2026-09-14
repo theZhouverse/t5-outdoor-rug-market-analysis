@@ -440,7 +440,14 @@ function lastNonEmpty(rows) {
 }
 
 function chartMonthLabel(month) {
-  return String(month).slice(0, 4) + '.' + Number(String(month).slice(4, 6));
+  return displayMonth(month);
+}
+
+// The workbook keeps YYYYMM as its stable key. Render the same zero-padded
+// YYYY.MM label everywhere in the frontend so 2026.07 cannot become 2026.7.
+function displayMonth(month) {
+  const value = String(month ?? '');
+  return /^\d{6}$/.test(value) ? value.slice(0, 4) + '.' + value.slice(4, 6) : value;
 }
 
 function chartValueLabel(value, percentMode = false, digits = 2) {
@@ -585,7 +592,7 @@ document.querySelectorAll(".interactive-chart").forEach(function(chart){chart.ad
 
 function trendTable(data, topData, candidateData) {
   const rows = data.map((r, i) => [
-    r.month.slice(0, 4) + '.' + Number(r.month.slice(4, 6)),
+    displayMonth(r.month),
     fmt(r.count),
     fmt(r.sales),
     fmt(r.revenue, 2),
@@ -598,12 +605,12 @@ function trendTable(data, topData, candidateData) {
     fmt(r.count-r.missingSales),fmt(r.count-r.missingRevenue),fmt(r.count-r.missingPrice),
     fmt(r.comparisonCount),r.quality
   ]);
-  return table(['月份', 'BSR候选行数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', 'BSR候选原始行数', '候选父ASIN数','销量有效数','金额有效数','价格有效数','去年同月候选行数','可比性'], rows);
+  return table(['月份', 'BSR候选行数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', 'BSR候选原始行数', 'BSR候选行数（回勾）','销量有效数','金额有效数','价格有效数','去年同月候选行数','可比性'], rows);
 }
 
 function topTrendTable(data, candidateData) {
   const rows = data.map((r, i) => [
-    r.month.slice(0, 4) + '.' + Number(r.month.slice(4, 6)),
+    displayMonth(r.month),
     fmt(r.count),
     fmt(r.sales),
     fmt(r.revenue, 2),
@@ -613,7 +620,7 @@ function topTrendTable(data, candidateData) {
     fmtPct(r.momRevenue),
     fmt(candidateData[i] ? candidateData[i].rawCount : null),fmt(candidateData[i]?.count),fmt(candidateData[i] ? Math.max(0,candidateData[i].count-r.count) : null),r.count<100?'少于100个样本':r.count>100?'超过100；并列或多小类':'100个样本',r.quality
   ]);
-  return table(['月份', 'BSR候选行数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', '候选原始行数','候选父ASIN数','重复父ASIN行数','样本状态','可比性'], rows);
+  return table(['月份', 'BSR候选行数', '销量', '销售额($)', '平均标价($)', '加权成交均价($)', '销量MOM', '销售额MOM', '候选原始行数','BSR候选行数（回勾）','截去数','样本状态','可比性'], rows);
 }
 
 function annualTable(data, topData, prefix = '整体') {
@@ -639,7 +646,7 @@ function annualTable(data, topData, prefix = '整体') {
 
 function tierTable(data, title) {
   const rows = data.map((r) => [
-    r.month.slice(0, 4) + '.' + Number(r.month.slice(4, 6)),
+    displayMonth(r.month),
     fmt(r.count),
     fmt(r.sales),
     fmt(r.revenue, 2),
@@ -653,7 +660,7 @@ function narrative(category, overall, pp, nonpp) {
   const latest = lastNonEmpty(category.monthly);
   const top = category.topMonthly.find((r) => r.month === latest.month) || {};
   const pieces = [];
-  pieces.push('截至 ' + latest.month.slice(0, 4) + '.' + Number(latest.month.slice(4, 6)) + '，' + category.title + '的BSR候选行池共有 ' + fmt(latest.count) + ' 条Listing月次，销量 ' + fmt(latest.sales) + '，销售额 $' + fmt(latest.revenue, 2) + '，平均标价 $' + fmt(latest.avgPrice, 2) + '。');
+  pieces.push('截至 ' + displayMonth(latest.month) + '，' + category.title + '的BSR候选行池共有 ' + fmt(latest.count) + ' 条Listing月次，销量 ' + fmt(latest.sales) + '，销售额 $' + fmt(latest.revenue, 2) + '，平均标价 $' + fmt(latest.avgPrice, 2) + '。');
   pieces.push('与去年同月相比（MOM），销量' + (latest.momSales === null ? '缺少可比月份' : (latest.momSales >= 0 ? '增长 ' : '下降 ') + fmtPct(Math.abs(latest.momSales))) + '，销售额' + (latest.momRevenue === null ? '缺少可比月份' : (latest.momRevenue >= 0 ? '增长 ' : '下降 ') + fmtPct(Math.abs(latest.momRevenue)) ) + '。');
   pieces.push('该分析池由原始行先筛 BSR 1—100（包含100），再保留每条候选行，不按父ASIN去重；本月保留 ' + fmt(top.count) + ' 条候选Listing行，父ASIN仅用于重复诊断，源候选行 ' + fmt(category.topCandidateMonthly.find((r) => r.month === latest.month)?.rawCount) + ' 行。');
   if (category.title === '整体市场') {
@@ -679,7 +686,7 @@ function annualBandTable(category){
 }
 
 function compositionTable(category){
-  return '<h4>BSR候选行池市场组成（PP + 高客单价 = 整体）</h4>'+table(['月份','整体候选行数','PP候选行数','高客单价候选行数','整体销量','PP销量','高客单价销量','整体金额($)','PP金额($)','高客单价金额($)'],category.composition.map(r=>[r.month,...['count','sales','revenue'].flatMap(k=>['overall','pp','high'].map(s=>fmt(r[s][k],k==='revenue'?2:0)))]));
+  return '<h4>BSR候选行池市场组成（PP + 高客单价 = 整体）</h4>'+table(['月份','整体候选行数','PP候选行数','高客单价候选行数','整体销量','PP销量','高客单价销量','整体金额($)','PP金额($)','高客单价金额($)'],category.composition.map(r=>[displayMonth(r.month),...['count','sales','revenue'].flatMap(k=>['overall','pp','high'].map(s=>fmt(r[s][k],k==='revenue'?2:0)))]));
 }
 
 function marketSection(id, number, category, overall, pp, nonpp) {
@@ -699,8 +706,8 @@ function marketSection(id, number, category, overall, pp, nonpp) {
   let out = '<section id="' + id + '"><h2>' + number + '｜' + esc(category.title) + '</h2>';
   out += '<p class="lead">本部分按“BSR候选行月度 → 年度YOY → 趋势图 → 头部/中部/尾部与五档 → 文字分析”展开。分析池先筛 BSR 1—100（含100），保留每条候选行，不按父ASIN去重；月度 MOM 为本月与去年同月比较，年度 YOY 为本年与上一年度共同月份比较。</p>';
   out += '<p class="scope-notice">最新月：'+esc(latest.quality)+'。这是一份原始导出样本的分析；样本变化可能影响增长率，表格保留两期数量与覆盖率。</p>';
-  out += '<div class="cards"><div class="card"><b>最新月整体销量</b><strong>' + fmt(latest.sales) + '</strong><small>' + esc(latest.month) + '</small></div>';
-  out += '<div class="card"><b>最新月整体销售额</b><strong>$' + fmt(latest.revenue, 2) + '</strong><small>原始月销售额合计</small></div>';
+  out += '<div class="cards"><div class="card"><b>最新月' + esc(category.title) + '销量</b><strong>' + fmt(latest.sales) + '</strong><small>' + esc(displayMonth(latest.month)) + '</small></div>';
+  out += '<div class="card"><b>最新月' + esc(category.title) + '销售额</b><strong>$' + fmt(latest.revenue, 2) + '</strong><small>候选行月销售额合计</small></div>';
   out += '<div class="card"><b>最新月 BSR候选行销量</b><strong>' + fmt(topLatest.sales) + '</strong><small>' + fmt(topLatest.count) + ' 条候选行</small></div>';
   out += '<div class="card"><b>最新月平均标价</b><strong>$' + fmt(latest.avgPrice, 2) + '</strong><small>按有价格记录算术平均</small></div></div>';
   out += subsection(id + '-1-1', sectionNo + '.1 月度汇总与可回勾数据', trendTable(category.monthly, category.topMonthly, category.topCandidateMonthly));
@@ -730,7 +737,7 @@ function genimoSection(category, overall, pp, genimoPP) {
     const base = overall.monthly[i] || {};
     const top = category.topMonthly[i] || {};
     return [
-      r.month.slice(0, 4) + '.' + Number(r.month.slice(4, 6)),
+      displayMonth(r.month),
       fmt(r.count),
       fmt(r.sales),
       fmt(r.revenue, 2),
@@ -748,7 +755,7 @@ function genimoSection(category, overall, pp, genimoPP) {
   const ppRows = genimoPP.monthly.map((r, i) => {
     const base = pp.monthly[i] || {};
     return [
-      r.month.slice(0, 4) + '.' + Number(r.month.slice(4, 6)),
+      displayMonth(r.month),
       fmt(r.count),
       fmt(r.sales),
       fmt(r.revenue, 2),
@@ -760,7 +767,7 @@ function genimoSection(category, overall, pp, genimoPP) {
     ];
   });
   let ppBody = '<p>PP市场份额分母为PP候选行池；GENIMO PP来自同一 BSR 1—100 候选行池中的品牌与PP交集。</p>';
-  ppBody += table(['月份', 'GENIMO PP Listing数', 'PP内销量', 'PP内销售额($)', '平均标价($)', '销量占PP', '销售额占PP', '销量MOM', '销售额MOM'], ppRows);
+  ppBody += table(['月份', 'GENIMO PP候选行数', 'PP内销量', 'PP内销售额($)', '平均标价($)', '销量占PP', '销售额占PP', '销量MOM', '销售额MOM'], ppRows);
   ppBody += '<h4>GENIMO PP年度YOY</h4>' + annualTable(genimoPP.annual, genimoPP.topAnnual, 'GENIMO PP');
   ppBody += '<div class="charts">' + svgBarChart('GENIMO PP 月销量', genimoPP.monthly, 'sales', '#be185d', 0) + svgBarChart('GENIMO PP 月销售额', genimoPP.monthly, 'revenue', '#9d174d', 2) + '</div>';
   out += subsection('genimo-4-2', '4.2 GENIMO 在 PP 市场中的表现', ppBody);
@@ -784,7 +791,7 @@ function genimoSection(category, overall, pp, genimoPP) {
   const evidence=narrative(category,overall,pp,null).map(t=>'<li>'+esc(t)+'</li>').join('');
   const planRows=BANDS.map(b=>{const r=category.annualBands[b.key].at(-1);const total=category.topAnnual.at(-1);return [b.name,fmt(r.sales),fmt(r.count),fmt(r.count>0?r.sales/r.count:null,2),fmtPct(total.sales>0?r.sales/total.sales:null),fmt(r.avgPrice,2),'待输入总链接数'];});
   out += subsection('genimo-4-6', '4.6 2027 年建议（仅基于当前原始字段）', '<div class="analysis"><ul class="analysis-list">' + evidence + advice + '<li>新增链接总量在XLSX 08页B3输入，默认空；按上表最近年度核心期品牌榜内销量权重分配，前两档向下取整、尾档取余。是资源分配情景，不是销量预测。</li><li>花型、颜色和尺寸尚未可靠提取，不能据此建议具体花型；不推导利润、广告或库存。</li></ul></div>'+table(['目标BSR层级','核心期销量','Listing月次','单Listing月次销量','分配权重','历史标价($)','新增链接数'],planRows));
-  out += subsection('genimo-4-7','4.7 GENIMO BSR候选行进留退', '<p>比较相邻自然月候选行池内的Listing键集合；进入/退出不等于上新/下架。父ASIN只作为审计字段。</p>'+table(['月份','基期月份','当前','基期','进入','保留','退出'],category.movements.map(r=>[r.month,r.previous,...['current','prior','entered','retained','exited'].map(k=>fmt(r[k]))]))+table(['月份','Listing键','基期BSR','本期BSR','状态'],category.movements.flatMap(r=>r.details.map(x=>[r.month,x.key,fmt(x.previousRank),fmt(x.currentRank),x.state]))));
+  out += subsection('genimo-4-7','4.7 GENIMO BSR候选行进留退', '<p>比较相邻自然月候选行池内的Listing键集合；进入/退出不等于上新/下架。父ASIN只作为审计字段。</p>'+table(['月份','基期月份','当前','基期','进入','保留','退出'],category.movements.map(r=>[displayMonth(r.month),displayMonth(r.previous),...['current','prior','entered','retained','exited'].map(k=>fmt(r[k]))]))+table(['月份','Listing键','基期BSR','本期BSR','状态'],category.movements.flatMap(r=>r.details.map(x=>[displayMonth(r.month),x.key,fmt(x.previousRank),fmt(x.currentRank),x.state]))));
   out += '</section>';
   return out;
 }
