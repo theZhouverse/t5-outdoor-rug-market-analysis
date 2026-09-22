@@ -1,0 +1,77 @@
+{
+  "specVersion": "3.1-parent-metrics",
+  "batchId": "parent-v31-202408-202607-181203121355",
+  "generatedAt": "2026-09-22T15:26:47.231Z",
+  "sourceDir": "data/raw/0920new",
+  "targetCategory": "Outdoor Rugs",
+  "months": [
+    "202408",
+    "202409",
+    "202410",
+    "202411",
+    "202412",
+    "202501",
+    "202502",
+    "202503",
+    "202504",
+    "202505",
+    "202506",
+    "202507",
+    "202508",
+    "202509",
+    "202510",
+    "202511",
+    "202512",
+    "202601",
+    "202602",
+    "202603",
+    "202604",
+    "202605",
+    "202606",
+    "202607"
+  ],
+  "firstMonth": "202408",
+  "lastMonth": "202607",
+  "fileCount": 24,
+  "rawRowCount": 48000,
+  "candidateRowCount": 45935,
+  "parentMonthCount": 1272,
+  "analysisOrder": "24个月新源 -> 类目与排名逐项对应，取Outdoor Rugs BSR 1-100 inclusive -> 保留子体明细 -> 父ASIN指标分别聚合 -> PP/高客单价/Genimo",
+  "parentSalesRule": "父ASIN下月销量全部一致取一致值；严格多数>50%取众数；否则取中位数并标记MEDIAN_CONFLICT。所有多值父体均标记冲突，主值为清洗估计",
+  "revenueRule": "父体有效子体销售额=同时具有子体销量和子体销售额的子体行销售额之和；月销售额($)只作源字段回勾，不累加",
+  "blankRule": "空白不等于0；子体销量和子体销售额同时有效才进入有效子体统计；部分字段缺失标记PARTIAL",
+  "classificationRule": "父体候选子体标题命中plastic多数归PP，否则归高客单价；Genimo按父体品牌多数",
+  "momRule": "本月/上月-1",
+  "yoyRule": "本月/去年同月-1",
+  "duplicateAsinGroups": 0,
+  "conflictParentCount": 681,
+  "medianParentCount": 243,
+  "missingRevenueParents": 356,
+  "mixedMarketParents": 92,
+  "ambiguousCategoryRankRows": 354,
+  "ambiguousMonths": [
+    "202508"
+  ],
+  "files": [
+    {
+      "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3-父体口径.html",
+      "sha256": "4195bf190f17ec8755d33c04df131014998cee30bb4ee94bb5bf27146e27ebf2",
+      "bytes": 3516088
+    },
+    {
+      "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3-父体口径.json",
+      "sha256": "7598daff707f2a07c353ea01eb67b89bf7cd40736824444c78fcdbdb3c17e8e1",
+      "bytes": 4259896
+    },
+    {
+      "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3-父体口径.md",
+      "sha256": "2e17f7572ead7c0043b71315409beaae9dad52c9536dcce38560e678d3c04997",
+      "bytes": 4900
+    },
+    {
+      "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3-父体口径可回勾.xlsx",
+      "sha256": "09111ef66075da0a336b01a8ac6b0806707b629434b0ea4d89e02a34dbb282ea",
+      "bytes": 15350134
+    }
+  ]
+}

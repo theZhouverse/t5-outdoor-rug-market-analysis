@@ -32,6 +32,10 @@ __pycache__/
 Thumbs.db
 
 # 原始 Excel/SQLite/.env 保持本地；需求文本、参考图片、分析报告和锁文件纳入版本控制，便于复现与回溯
+data/raw/0920new/
+
+# 完整中间模型超过GitHub单文件限制；发布使用经过裁剪的报告JSON和审计摘要
+outputs/20260920-new-source-parent-model/model.json
 
 # GitHub Pages 部署工作树（独立分支，不入主库）
 .gh-pages/

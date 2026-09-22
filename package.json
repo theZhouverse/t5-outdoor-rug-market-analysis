@@ -21,7 +21,10 @@
     "analyze:legacy": "node src/analyze_market.js",
     "analyze:spec2": "node src/build_spec2_html.mjs",
     "poc": "node sandbox/test_xlsx.js",
-    "test:frontend": "node tests/spec21_checks.mjs --delivery"
+    "test:frontend": "node tests/spec21_checks.mjs --delivery",
+    "build:parent": "node src/build_parent_source_delivery.mjs",
+    "test:parent": "node tests/parent_source_audit.mjs",
+    "test:parent:formula": "node src/run_parent_formula_audit.mjs"
   },
   "dependencies": {
     "xlsx": "^0.18.5",

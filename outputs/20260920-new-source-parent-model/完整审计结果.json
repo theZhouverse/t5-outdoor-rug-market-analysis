@@ -1,0 +1,37 @@
+{
+  "status": "PASS",
+  "source": {
+    "files": 24,
+    "months": "2024.08—2026.07",
+    "rawRows": 48000,
+    "candidateRows": 45935,
+    "ambiguousCategoryRankRows": 354,
+    "ambiguousMonth": "2025.08"
+  },
+  "model": {
+    "parentMonthCount": 1272,
+    "duplicateAsinGroups": 0,
+    "conflictParentCount": 681,
+    "medianParentCount": 243,
+    "missingRevenueParents": 356,
+    "mixedMarketParents": 92
+  },
+  "sample": {
+    "month": "202607",
+    "parent": "B0BM74444Q",
+    "sales": 3901,
+    "salesStatus": "MODE",
+    "childRevenue": 154430,
+    "childCoverage": 0.42028985507246375
+  },
+  "workbook": {
+    "sheets": 16,
+    "expectedSheets": true,
+    "formulasPresent": true,
+    "cachedValuesMatchModel": true
+  },
+  "html": {
+    "embeddedDataMatchesBatch": true,
+    "navigationAndDisclosurePresent": true
+  }
+}
