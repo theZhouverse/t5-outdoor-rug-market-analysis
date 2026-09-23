@@ -23,7 +23,8 @@
     "poc": "node sandbox/test_xlsx.js",
     "test:frontend": "node tests/spec21_checks.mjs --delivery",
     "build:parent": "node src/build_parent_source_delivery.mjs",
-    "test:parent": "node tests/parent_source_audit.mjs",
+    "test:parent": "node tests/spec37_audit.mjs",
+    "test:spec37": "node tests/spec37_audit.mjs",
     "test:parent:formula": "node src/run_parent_formula_audit.mjs"
   },
   "dependencies": {

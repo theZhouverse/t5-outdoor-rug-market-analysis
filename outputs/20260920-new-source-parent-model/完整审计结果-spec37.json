@@ -1,0 +1,35 @@
+{
+  "status": "PASS",
+  "spec": "3.7",
+  "source": {
+    "files": 24,
+    "rawRows": 48000,
+    "candidateRows": 46780,
+    "bsrObservationRows": 46854
+  },
+  "model": {
+    "parentMonthCount": 1334,
+    "duplicateAsinGroups": 0,
+    "qConflictParentCount": 689,
+    "tConflictParentCount": 1082
+  },
+  "sample": {
+    "month": "202607",
+    "parentKey": "B0BM74444Q",
+    "qAvg": 4389.405797101449,
+    "tAvg": 244400.33333333334,
+    "bsr10QAvg": 4698.315789473684,
+    "bsr10TAvg": 313169.0263157895
+  },
+  "workbook": {
+    "sheets": 16,
+    "formulasPresent": true,
+    "cachedErrors": 0
+  },
+  "html": {
+    "embeddedData": true,
+    "navigation": true,
+    "collapsibleSections": true,
+    "charts": true
+  }
+}

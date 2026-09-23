@@ -14,10 +14,10 @@ function runPython(file, args = []) {
 }
 
 export async function buildParentDelivery() {
-  const model = spawn(process.execPath, ['src/build_parent_source_model.mjs'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
+  const model = spawn(process.execPath, ['src/build_spec37_model.mjs'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
   await new Promise((resolve, reject) => { model.on('error', reject); model.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`model build failed with exit code ${code}`))); });
-  await runPython('src/build_parent_source_xlsx.py');
-  const child = spawn(process.execPath, ['src/build_parent_source_html.mjs'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
+  await runPython('src/build_spec37_xlsx.py');
+  const child = spawn(process.execPath, ['src/build_spec37_html.mjs'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
   await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`HTML build failed with exit code ${code}`))); });
 }
 
