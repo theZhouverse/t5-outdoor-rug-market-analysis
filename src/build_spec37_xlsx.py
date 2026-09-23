@@ -189,14 +189,72 @@ for col in [8, 9]: annual_ws.set_column(col, col, 14, fmt['ratio'])
 
 # 06 BSR tiers
 bsr_out = []
+bsr_row_keys = []
+scope_names = {'overall': '整体市场', 'pp': 'PP市场', 'high': '高客单价市场', 'genimo': 'Genimo品牌', 'genimoPP': 'Genimo PP市场'}
 for key in ['overall', 'pp', 'high', 'genimo', 'genimoPP']:
     for band in ['head', 'middle', 'tail']:
         for r in MODEL['bsr'][key]['tiers'][band]:
-            bsr_out.append([{'overall':'整体市场','pp':'PP市场','high':'高客单价市场','genimo':'Genimo品牌','genimoPP':'Genimo PP市场'}[key], r['month'], r['bsrTier'], r['sales'], r['revenue'], r['avgPrice'], r['weightedPrice'], r['bsrValueCount'], r['observationCount'], r['momSales'], r['yoySales'], r['momRevenue'], r['yoyRevenue']])
+            bsr_out.append([scope_names[key], r['month'], r['bsrTier'], r['sales'], r['revenue'], r['avgPrice'], r['weightedPrice'], r['bsrValueCount'], r['observationCount'], r['momSales'], r['yoySales'], r['momRevenue'], r['yoyRevenue']])
+            bsr_row_keys.append((key, band, r['month']))
 bsr_ws = write_table('06_BSR分层', ['范围', '月份', 'BSR档位', '月销量', '月销售额($)', '平均标价($)', '加权成交均价($)', 'BSR值组数', 'BSR观察记录数', '销量MOM', '销量YOY', '销售额MOM', '销售额YOY'], bsr_out, [18, 12, 16, 16, 18, 16, 18, 12, 16, 12, 12, 14, 14])
 for col in [3, 7, 8]: bsr_ws.set_column(col, col, 16, fmt['int'])
 for col in [4, 5, 6]: bsr_ws.set_column(col, col, 18, fmt['money'])
 for col in [9, 10, 11, 12]: bsr_ws.set_column(col, col, 14, fmt['ratio'])
+
+# BSR value groups are shown below the business table so every tier result can be traced to formula inputs.
+group_headers_row = len(bsr_out) + 3
+bsr_ws.write(group_headers_row, 0, 'BSR值组明细（公式来源）', fmt['section'])
+bsr_ws.merge_range(group_headers_row, 0, group_headers_row, 6, 'BSR值组明细（公式来源）', fmt['section'])
+group_header_row = group_headers_row + 1
+group_headers = ['范围', '月份', 'BSR值', 'BSR平均销量', 'BSR平均销售额($)', '平均标价($)', '加权成交均价($)']
+for c, h in enumerate(group_headers): bsr_ws.write(group_header_row, c, h, fmt['header'])
+bsr_groups_out = []
+for key in ['overall', 'pp', 'high', 'genimo', 'genimoPP']:
+    for g in MODEL['bsr'][key]['groups']:
+        bsr_groups_out.append([scope_names[key], g['month'], g['bsr'], g['qAvg'], g['tAvg'], g['avgPrice'], g['weightedPrice']])
+for r, row in enumerate(bsr_groups_out, group_header_row + 1):
+    for c, value in enumerate(row): bsr_ws.write(r, c, safe(value), fmt['text'] if isinstance(value, str) else fmt['num'])
+group_start = group_header_row + 2
+group_end = group_start + len(bsr_groups_out) - 1
+for c, w in enumerate([18, 12, 10, 16, 18, 16, 18]): bsr_ws.set_column(c, c, w)
+bsr_map = {key: i + 2 for i, key in enumerate(bsr_row_keys)}
+band_bounds = {'head': (1, 20), 'middle': (21, 50), 'tail': (51, 100)}
+for i, ((key, band, m), cached) in enumerate(zip(bsr_row_keys, bsr_out), 1):
+    er = i + 1
+    lo, hi = band_bounds[band]
+    scope_ref = f'A{er}'; month_ref = f'B{er}'
+    group_scope = f'$A${group_start}:$A${group_end}'
+    group_month = f'$B${group_start}:$B${group_end}'
+    group_rank = f'$C${group_start}:$C${group_end}'
+    group_q = f'$D${group_start}:$D${group_end}'
+    group_t = f'$E${group_start}:$E${group_end}'
+    group_price = f'$F${group_start}:$F${group_end}'
+    formula(bsr_ws, i, 3, f'=IFERROR(AVERAGEIFS({group_q},{group_scope},{scope_ref},{group_month},{month_ref},{group_rank},">={lo}",{group_rank},"<={hi}"),"")', cached[3], 'formula')
+    formula(bsr_ws, i, 4, f'=IFERROR(AVERAGEIFS({group_t},{group_scope},{scope_ref},{group_month},{month_ref},{group_rank},">={lo}",{group_rank},"<={hi}"),"")', cached[4], 'formula_money')
+    formula(bsr_ws, i, 5, f'=IFERROR(AVERAGEIFS({group_price},{group_scope},{scope_ref},{group_month},{month_ref},{group_rank},">={lo}",{group_rank},"<={hi}"),"")', cached[5], 'formula_money')
+    formula(bsr_ws, i, 6, f'=IFERROR(E{er}/D{er},"")', cached[6], 'formula_money')
+    prior = f'{int(m[:4]) - 1}{m[4:]}'
+    prior_key = (key, band, prior)
+    formula(bsr_ws, i, 9, f'=IFERROR(D{er}/D{bsr_map[prior_key]},"")' if prior_key in bsr_map else '=""', cached[9], 'formula_ratio')
+    year = int(m[:4])
+    if year == 2025:
+        current_start, prior_start = '202508', '202408'
+    elif year == 2026:
+        current_start, prior_start = '202601', '202501'
+    else:
+        current_start = prior_start = None
+    if current_start:
+        prior_end = f'{year - 1}{m[4:]}'
+        yoy_sales = f'=IFERROR(SUMIFS($D$2:$D${len(bsr_out)+1},$A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={current_start}",$B$2:$B${len(bsr_out)+1},"<={m}")/SUMIFS($D$2:$D${len(bsr_out)+1},$A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={prior_start}",$B$2:$B${len(bsr_out)+1},"<={prior_end}"),"")'
+        yoy_revenue = f'=IFERROR(SUMIFS($E$2:$E${len(bsr_out)+1},$A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={current_start}",$B$2:$B${len(bsr_out)+1},"<={m}")/SUMIFS($E$2:$E${len(bsr_out)+1},$A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={prior_start}",$B$2:$B${len(bsr_out)+1},"<={prior_end}"),"")'
+    else:
+        yoy_sales = yoy_revenue = '=""'
+    formula(bsr_ws, i, 10, yoy_sales, cached[10], 'formula_ratio')
+    formula(bsr_ws, i, 11, f'=IFERROR(E{er}/E{bsr_map[prior_key]},"")' if prior_key in bsr_map else '=""', cached[11], 'formula_ratio')
+    if current_start:
+        formula(bsr_ws, i, 12, yoy_revenue, cached[12], 'formula_ratio')
+    else:
+        formula(bsr_ws, i, 12, '=""', cached[12], 'formula_ratio')
 
 # 07—09
 conflict_out = [[p['month'], p['parentKey'], p['candidateRows'], p['qValidRows'], p['qMin'], p['qMax'], p['qUnique'], p['tValidRows'], p['tMin'], p['tMax'], p['tUnique'], 'Q多值' if p['qConflict'] else '', 'T多值' if p['tConflict'] else '', p['ppStatus'], p['genimoStatus']] for p in parent_rows if p['qConflict'] or p['tConflict'] or p['ppStatus'] == 'TIE' or p['genimoStatus'] == 'TIE']
