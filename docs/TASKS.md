@@ -18,10 +18,10 @@ Phase 22.4完成前，上一版Excel、HTML、JSON和GitHub Pages只作历史记
 
 - [x] 17.1 修正MOM为“本月与去年同月比较”，修正YOY为“本年与上一年比较”，并在SPEC、流程文档、README和审查记录中统一表述。
 - [x] 17.2 取消使用“小类目=Outdoor Rugs”作为入池条件，改为只按“小类BSR”是否存在1—100有效排名；定义多值小类BSR、行级BSR中位数和新的审计状态。
-- [ ] 17.3 按SPEC 3.2改造构建程序、独立审计和Excel公式，重新计算候选行、父体月份、MOM、YOY和BSR分层。
-- [ ] 17.4 重新生成XLSX、HTML、JSON、Markdown，完成Excel/网页/公式/勾稽审计后再更新GitHub Pages。
+- [x] 17.3 该历史任务由Phase 22的SPEC 3.7构建、独立审计和Excel公式重建替代，当前结果已按3.7执行。
+- [x] 17.4 该历史任务的XLSX、HTML、JSON、Markdown和审计已由Phase 22重新生成；历史3.2数字不作为当前验收口径。
 
-Phase 17.3和17.4完成前，上一版SPEC 3.1输出只作历史记录，不能作为当前数字验收。
+Phase 22.4是当前执行基线；Phase 17及其更早输出只作历史记录，不能作为当前数字验收。
 
 ## Phase 16: 2026-09-22 SPEC 3.1 新源父体指标审计与交付（历史）
 
