@@ -179,13 +179,32 @@ for key, sheet_name in sheet_names.items():
 
 # 05 annual
 annual_out = []
+annual_keys = []
 for key in ['overall', 'pp', 'high', 'genimo']:
     for r in MODEL['annual'][key]:
         annual_out.append([names[key] if False else {'overall':'整体市场','pp':'PP市场','high':'高客单价市场','genimo':'Genimo品牌'}[key], r['year'], ', '.join(map(month_label, r['months'])) or '—', ', '.join(map(month_label, r['priorMonths'])) or '—', r['sales'], r['priorSales'], r['revenue'], r['priorRevenue'], r['yoySales'], r['yoyRevenue'], r['weightedPrice'], r['status']])
+        annual_keys.append((key, r))
 annual_ws = write_table('05_年度YOY', ['范围', '年份', '本期共同月份', '基期共同月份', '本期销量', '基期销量', '本期销售额($)', '基期销售额($)', '销量YOY', '销售额YOY', '本期加权成交均价($)', '期间状态'], annual_out, [18, 10, 34, 34, 16, 16, 18, 18, 12, 14, 20, 16])
 for col in [4, 5]: annual_ws.set_column(col, col, 16, fmt['num'])
 for col in [6, 7, 10]: annual_ws.set_column(col, col, 18, fmt['money'])
 for col in [8, 9]: annual_ws.set_column(col, col, 14, fmt['ratio'])
+for i, (key, r) in enumerate(annual_keys, 1):
+    if r['months']:
+        monthly_sheet = sheet_names[key]
+        current_start, current_end = r['months'][0], r['months'][-1]
+        prior_start, prior_end = r['priorMonths'][0], r['priorMonths'][-1]
+        q_range = f'{qsheet(monthly_sheet)}!$B$2:$B$25'
+        revenue_range = f'{qsheet(monthly_sheet)}!$C$2:$C$25'
+        month_range = f'{qsheet(monthly_sheet)}!$A$2:$A$25'
+        formula(annual_ws, i, 4, f'=SUMIFS({q_range},{month_range},">={current_start}",{month_range},"<={current_end}")', r['sales'], 'formula')
+        formula(annual_ws, i, 5, f'=SUMIFS({q_range},{month_range},">={prior_start}",{month_range},"<={prior_end}")', r['priorSales'], 'formula')
+        formula(annual_ws, i, 6, f'=SUMIFS({revenue_range},{month_range},">={current_start}",{month_range},"<={current_end}")', r['revenue'], 'formula_money')
+        formula(annual_ws, i, 7, f'=SUMIFS({revenue_range},{month_range},">={prior_start}",{month_range},"<={prior_end}")', r['priorRevenue'], 'formula_money')
+        formula(annual_ws, i, 8, f'=IFERROR(E{i+1}/F{i+1},"")', r['yoySales'], 'formula_ratio')
+        formula(annual_ws, i, 9, f'=IFERROR(G{i+1}/H{i+1},"")', r['yoyRevenue'], 'formula_ratio')
+        formula(annual_ws, i, 10, f'=IFERROR(G{i+1}/E{i+1},"")', r['weightedPrice'], 'formula_money')
+    else:
+        for c in [4, 5, 6, 7, 8, 9, 10]: formula(annual_ws, i, c, '=""', None, 'formula')
 
 # 06 BSR tiers
 bsr_out = []
