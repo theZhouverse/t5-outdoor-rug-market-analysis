@@ -69,7 +69,8 @@ assert.ok(monthly.F14?.f?.includes('B14/B2'));
 assert.ok(monthly.G14?.f?.includes('SUMIFS'));
 assert.ok(book.Sheets['92_父体月度汇总'].I2?.f?.includes('AVERAGEIFS'));
 assert.ok(book.Sheets['92_父体月度汇总'].J2?.f?.includes('AVERAGEIFS'));
-assert.ok(book.Sheets['06_BSR分层']);
+assert.ok(book.Sheets['06_BSR分层'].D2?.f?.includes('AVERAGEIFS'));
+assert.ok(book.Sheets['06_BSR分层'].A364?.v === 'BSR值组明细（公式来源）');
 for (const sheetName of book.SheetNames) {
   for (const cell of Object.values(book.Sheets[sheetName])) {
     if (!cell || typeof cell !== 'object') continue;
