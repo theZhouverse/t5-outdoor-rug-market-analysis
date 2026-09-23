@@ -195,11 +195,11 @@ function annualRows(rows) {
   });
 }
 
-function buildBsrGroups(observations, parentsByKey) {
+function buildBsrGroups(observations, parentsByKey, rowFilter = () => true) {
   const grouped = new Map();
   for (const obs of observations) {
     const parent = parentsByKey.get(`${obs.month}|${obs.parentKey}`);
-    if (!parent) continue;
+    if (!parent || !rowFilter(parent)) continue;
     const key = `${obs.month}|${obs.rank}`;
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push({ ...obs, parent });
@@ -220,8 +220,8 @@ function buildBsrGroups(observations, parentsByKey) {
   return rows.sort((a, b) => a.month.localeCompare(b.month) || a.bsr - b.bsr);
 }
 
-function buildBsrTiers(groupRows, filter) {
-  const groups = groupRows.filter(filter);
+function buildBsrTiers(groupRows) {
+  const groups = groupRows;
   const months = [...new Set(groups.map((r) => r.month))].sort();
   const tiers = Object.fromEntries(BANDS.map((b) => [b.key, addComparisons(months.map((month) => {
     const rows = groups.filter((r) => r.month === month && r.bsr >= b.lo && r.bsr <= b.hi);
@@ -243,7 +243,10 @@ export function buildModel() {
   const expected = Array.from({ length: 24 }, (_, i) => { const d = new Date(2024, 7 + i, 1); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`; });
   if (months.join(',') !== expected.join(',')) throw new Error('月份必须唯一且连续覆盖202408—202607');
   const rawRows = sourceFiles.flatMap((s) => s.rows);
-  const candidateRows = rawRows.filter((r) => r.eligibleRanks.length > 0).sort((a, b) => a.month.localeCompare(b.month) || a.parentKey.localeCompare(b.parentKey) || a.sourceRow - b.sourceRow);
+  const candidateRows = rawRows.filter((r) => r.eligibleRanks.length > 0).sort((a, b) => {
+    const salesOrder = (Number.isFinite(a.sales) ? a.sales : Number.POSITIVE_INFINITY) - (Number.isFinite(b.sales) ? b.sales : Number.POSITIVE_INFINITY);
+    return a.month.localeCompare(b.month) || a.parentKey.localeCompare(b.parentKey) || salesOrder || a.asin.localeCompare(b.asin) || a.sourceRow - b.sourceRow;
+  });
   const observations = candidateRows.flatMap((r) => r.eligibleRanks.map((rank) => ({
     month: r.month, parentKey: r.parentKey, sourceRow: r.sourceRow, asin: r.asin, rank,
     sales: r.sales, sourceRevenue: r.sourceRevenue, price: r.price
@@ -274,13 +277,12 @@ export function buildModel() {
     summaries[key] = addComparisons(months.map((month) => monthSummary(month, parentByMonth.get(month) || [], c.filter)));
     annual[key] = annualRows(summaries[key]);
   }
-  const bsrGroups = buildBsrGroups(observations, parentByKey);
-  const bsr = Object.fromEntries(Object.entries(categories).map(([key, c]) => [key, buildBsrTiers(bsrGroups, (g) => {
-    if (key === 'overall') return true;
-    return g.parentKeys.some((pk) => c.filter(parentByKey.get(`${g.month}|${pk}`)));
-  })]));
+  // BSR is an independent branch: filter observations by the target business scope
+  // first, then average within month + BSR value. This prevents a mixed group from
+  // leaking observations from another market merely because it shares the same rank.
+  const bsr = Object.fromEntries(Object.entries(categories).map(([key, c]) => [key, buildBsrTiers(buildBsrGroups(observations, parentByKey, c.filter))]));
   const duplicateMap = new Map();
-  for (const row of candidateRows) if (row.asin) {
+  for (const row of rawRows) if (row.asin) {
     const key = `${row.month}|${row.asin}`;
     if (!duplicateMap.has(key)) duplicateMap.set(key, []);
     duplicateMap.get(key).push(row.sourceRow);

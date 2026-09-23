@@ -1,7 +1,7 @@
 {
   "specVersion": "3.7",
   "batchId": "spec37-202408-202607-181203121355",
-  "generatedAt": "2026-09-23T08:46:18.928Z",
+  "generatedAt": "2026-09-23T10:10:31.396Z",
   "sourceDir": "data/raw/0920new",
   "months": [
     "202408",
@@ -56,23 +56,23 @@
   "files": [
     {
       "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.html",
-      "bytes": 2577848,
-      "sha256": "608f267f982f08d380a9090f32875085ddafa7eb1e3d244adf08b0b99df0256b"
+      "bytes": 2576267,
+      "sha256": "4ab9319b04f7e64b1ad5448faf64c29b8e1bce3abf26d62e54902ffb443d9896"
     },
     {
       "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.json",
-      "bytes": 3315254,
-      "sha256": "cc05fa256551bcc780e97bfa92b3937ac267007a65831c8fe7848036cefcd9c9"
+      "bytes": 3314153,
+      "sha256": "91c026bf2b74162be4ac3c851b1019559243f144c7372464a06fee57646e1261"
     },
     {
       "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.md",
-      "bytes": 4290,
-      "sha256": "89a304a861c53d629df63e5c031617ba2489609a6c2d8fcfae2d8b0d4e80234f"
+      "bytes": 4288,
+      "sha256": "c72b6fb62d7846348da5841c4574e3a20fd065be0a7e2ceba85bf892c3ed3dc0"
     },
     {
       "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.xlsx",
-      "bytes": 8007487,
-      "sha256": "4080342ff68eb66bbae74ce506c49343c97898aeb9e403e415fb188982e403f0"
+      "bytes": 8336244,
+      "sha256": "95bc87acd72793e9c63a99e50b7347c0b7d977e602be08075e6c459e66f2cc82"
     }
   ]
 }

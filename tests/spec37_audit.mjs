@@ -9,6 +9,9 @@ const model = buildModel();
 const saved = JSON.parse(fs.readFileSync(`${OUT}/model-spec37.json`, 'utf8'));
 const json = JSON.parse(fs.readFileSync(`${OUT}/户外地垫市场分析-SPEC3.7-父体口径.json`, 'utf8'));
 const html = fs.readFileSync(`${OUT}/户外地垫市场分析-SPEC3.7-父体口径.html`, 'utf8');
+const embeddedMatch = html.match(/<script id="report-data" type="application\/json">([\s\S]*?)<\/script>/);
+assert.ok(embeddedMatch, 'HTML report-data missing');
+const embedded = JSON.parse(embeddedMatch[1]);
 const book = XLSX.readFile(`${OUT}/户外地垫市场分析-SPEC3.7-父体口径.xlsx`, { cellFormula: true, cellNF: true, cellDates: false });
 const close = (a, b) => (a == null && b == null) || (Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 1e-6);
 
@@ -20,6 +23,7 @@ assert.equal(model.metadata.parentMonthCount, 1334);
 assert.equal(model.duplicateAsins?.length ?? model.metadata.duplicateAsinGroups, 0);
 assert.equal(saved.metadata.batchId, model.metadata.batchId);
 assert.equal(json.metadata.batchId, model.metadata.batchId);
+assert.deepEqual(embedded, json, 'HTML report-data differs from delivery JSON');
 assert.ok(html.includes('SPEC 3.7'));
 assert.ok(html.includes('MOM为本月÷去年同月'));
 assert.ok(!html.includes('销量MOM（上月）'));
@@ -50,6 +54,15 @@ const head = model.bsr.overall.tiers.head.find((r) => r.month === '202607');
 const headGroups = bsrGroups.filter((r) => r.month === '202607' && r.bsr >= 1 && r.bsr <= 20);
 assert.ok(close(head.sales, headGroups.reduce((a, r) => a + (r.qAvg ?? 0), 0) / headGroups.filter((r) => Number.isFinite(r.qAvg)).length));
 
+// Each scoped BSR branch must filter observations before the month + BSR average.
+// Recompute one PP group directly from parent classifications to catch cross-market leakage.
+const parentMap = new Map(model.parentRows.map((p) => [`${p.month}|${p.parentKey}`, p]));
+const ppGroup = model.bsr.pp.groups.find((r) => r.month === '202607' && Number.isFinite(r.qAvg));
+assert.ok(ppGroup);
+const ppObs = model.observations.filter((r) => r.month === ppGroup.month && r.rank === ppGroup.bsr && parentMap.get(`${r.month}|${r.parentKey}`)?.pp);
+assert.equal(ppGroup.observationCount, ppObs.length);
+assert.ok(close(ppGroup.qAvg, ppObs.filter((r) => Number.isFinite(r.sales) && r.sales >= 0).reduce((a, r) => a + r.sales, 0) / ppObs.filter((r) => Number.isFinite(r.sales) && r.sales >= 0).length));
+
 // MOM is same-month prior-year ratio; monthly YOY is common-month cumulative ratio.
 const sep2025 = model.summaries.overall.find((r) => r.month === '202509');
 const sep2024 = model.summaries.overall.find((r) => r.month === '202409');
@@ -69,10 +82,17 @@ assert.ok(monthly.F14?.f?.includes('B14/B2'));
 assert.ok(monthly.G14?.f?.includes('SUMIFS'));
 assert.ok(book.Sheets['92_父体月度汇总'].I2?.f?.includes('AVERAGEIFS'));
 assert.ok(book.Sheets['92_父体月度汇总'].J2?.f?.includes('AVERAGEIFS'));
+assert.ok(book.Sheets['92_父体月度汇总'].I2?.f?.includes('>=0'));
+assert.ok(book.Sheets['92_父体月度汇总'].J2?.f?.includes('>=0'));
 assert.ok(book.Sheets['06_BSR分层'].D2?.f?.includes('AVERAGEIFS'));
 assert.ok(book.Sheets['06_BSR分层'].A364?.v === 'BSR值组明细（公式来源）');
 assert.ok(book.Sheets['05_年度YOY'].E3?.f?.includes('SUMIFS'));
 assert.ok(book.Sheets['05_年度YOY'].I3?.f?.includes('E3/F3'));
+assert.ok(book.Sheets['00_数据总览'].C25?.l?.Target?.includes('01_整体市场月度'), '00 overview missing internal sheet link');
+for (const sheetName of ['90_原始输入', '91_BSR候选子体明细']) {
+  const headers = XLSX.utils.sheet_to_json(book.Sheets[sheetName], { header: 1, range: 0, raw: true })[0] ?? [];
+  assert.ok(headers.includes('MULTI_BSR'), `${sheetName} missing MULTI_BSR`);
+}
 for (const sheetName of book.SheetNames) {
   for (const cell of Object.values(book.Sheets[sheetName])) {
     if (!cell || typeof cell !== 'object') continue;

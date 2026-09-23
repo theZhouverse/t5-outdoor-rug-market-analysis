@@ -103,22 +103,48 @@ notes = [
 ]
 for i, note in enumerate(notes, 16): ws.merge_range(i, 0, i, 2, note, fmt['note'])
 
+# Reader-facing internal links make the workbook's audit entry points discoverable
+# without changing any business calculation columns.
+ws.merge_range('A23:C23', '工作表入口', fmt['section'])
+for c, h in enumerate(['工作表', '用途', '入口']): ws.write(23, c, h, fmt['header'])
+sheet_links = [
+    ('01_整体市场月度', '第一部分：整体市场固定九列月度结果'),
+    ('02_PP市场月度', '第二部分：PP市场固定九列月度结果'),
+    ('03_高客单价市场月度', '第三部分：高客单价市场固定九列月度结果'),
+    ('04_Genimo品牌月度', '第四部分：Genimo整体品牌结果'),
+    ('04B_Genimo_PP月度', 'Genimo在PP市场的辅助范围'),
+    ('05_年度YOY', '共同月份年度YOY分子分母'),
+    ('06_BSR分层', 'BSR月份+BSR值平均及三档'),
+    ('07_父体冲突诊断', 'Q/T多值与分类冲突回查'),
+    ('08_2027策略', '数据依据和2027建议'),
+    ('09_勾稽检查', 'PP+高客单价回加检查'),
+    ('90_原始输入', '原始快照和MULTI_BSR回勾入口'),
+    ('91_BSR候选子体明细', 'BSR候选清洗明细'),
+    ('92_父体月度汇总', '父体Q/T平均计算层'),
+    ('93_来源登记', '24个月来源与SHA-256'),
+    ('94_规则说明', '字段和公式口径'),
+]
+for r, (sheet_name, purpose) in enumerate(sheet_links, 24):
+    ws.write(r, 0, sheet_name, fmt['text'])
+    ws.write(r, 1, purpose, fmt['text'])
+    ws.write_url(r, 2, f"internal:'{sheet_name}'!A1", fmt['text'], '打开')
+
 # 90 raw input
-raw_headers = ['月份', '源文件', '源Sheet', '源行号', 'ASIN', '品牌', '商品标题', '父ASIN', '小类目', '小类BSR', '月销量', '月销售额($)', '子体销量', '子体销售额($)', '价格($)', 'BSR解析值', '合格状态']
+raw_headers = ['月份', '源文件', '源Sheet', '源行号', 'ASIN', '品牌', '商品标题', '父ASIN', '小类目', '小类BSR', '月销量', '月销售额($)', '子体销量', '子体销售额($)', '价格($)', 'BSR解析值', '合格状态', 'MULTI_BSR']
 raw_rows = []
 for r in MODEL['rawRows']:
-    raw_rows.append([r['month'], r['file'], r['sheet'], r['sourceRow'], r['asin'], r['brand'], r['title'], r['parent'], r['category'], r['sourceBsr'], r['sales'], r['sourceRevenue'], r['childSales'], r['childRevenue'], r['price'], '\n'.join(map(str, r['parsedRanks'])), r['bsrStatus']])
-raw_ws = write_table('90_原始输入', raw_headers, raw_rows, [10, 34, 24, 9, 16, 18, 46, 16, 28, 18, 13, 17, 13, 17, 12, 16, 16])
+    raw_rows.append([r['month'], r['file'], r['sheet'], r['sourceRow'], r['asin'], r['brand'], r['title'], r['parent'], r['category'], r['sourceBsr'], r['sales'], r['sourceRevenue'], r['childSales'], r['childRevenue'], r['price'], '\n'.join(map(str, r['parsedRanks'])), r['bsrStatus'], int(r['multiBsr'])])
+raw_ws = write_table('90_原始输入', raw_headers, raw_rows, [10, 34, 24, 9, 16, 18, 46, 16, 28, 18, 13, 17, 13, 17, 12, 16, 16, 12])
 for col in [10, 12]: raw_ws.set_column(col, col, 14, fmt['num'])
 for col in [11, 13, 14]: raw_ws.set_column(col, col, 17, fmt['money'])
 
 # 91 candidate detail
-cand_headers = ['月份', '父体键', '父ASIN', 'ASIN', '源行号', '小类BSR解析值', '商品标题', '品牌', '月销量Q', '月销售额T($)', '子体销量', '子体销售额($)', '价格($)', 'PP候选行', 'Genimo候选行', 'Q有效', 'T有效', '子体有效', '源文件', '源Sheet']
+cand_headers = ['月份', '父体键', '父ASIN', 'ASIN', '源行号', '小类BSR解析值', '商品标题', '品牌', '月销量Q', '月销售额T($)', '子体销量', '子体销售额($)', '价格($)', 'PP候选行', 'Genimo候选行', 'Q有效', 'T有效', '子体有效', '源文件', '源Sheet', 'MULTI_BSR']
 cand_out = []
 for r in cand_rows:
     valid_child = all(isinstance(r.get(k), (int, float)) and r.get(k) >= 0 for k in ['childSales', 'childRevenue']) and not (r.get('childSales') == 0 and r.get('childRevenue', 0) > 0)
-    cand_out.append([r['month'], r['parentKey'], r['parent'], r['asin'], r['sourceRow'], '\n'.join(map(str, r['eligibleRanks'])), r['title'], r['brand'], r['sales'], r['sourceRevenue'], r['childSales'], r['childRevenue'], r['price'], None if r['pp'] is None else int(r['pp']), None if r['genimo'] is None else int(r['genimo']), int(isinstance(r.get('sales'), (int, float)) and r['sales'] >= 0), int(isinstance(r.get('sourceRevenue'), (int, float)) and r['sourceRevenue'] >= 0), int(valid_child), r['file'], r['sheet']])
-cand_ws = write_table('91_BSR候选子体明细', cand_headers, cand_out, [10, 20, 16, 16, 9, 14, 46, 18, 13, 17, 13, 17, 12, 12, 14, 10, 10, 10, 34, 24])
+    cand_out.append([r['month'], r['parentKey'], r['parent'], r['asin'], r['sourceRow'], '\n'.join(map(str, r['eligibleRanks'])), r['title'], r['brand'], r['sales'], r['sourceRevenue'], r['childSales'], r['childRevenue'], r['price'], None if r['pp'] is None else int(r['pp']), None if r['genimo'] is None else int(r['genimo']), int(isinstance(r.get('sales'), (int, float)) and r['sales'] >= 0), int(isinstance(r.get('sourceRevenue'), (int, float)) and r['sourceRevenue'] >= 0), int(valid_child), r['file'], r['sheet'], int(r['multiBsr'])])
+cand_ws = write_table('91_BSR候选子体明细', cand_headers, cand_out, [10, 20, 16, 16, 9, 14, 46, 18, 13, 17, 13, 17, 12, 12, 14, 10, 10, 10, 34, 24, 12])
 for col in [8, 10]: cand_ws.set_column(col, col, 14, fmt['num'])
 for col in [9, 11, 12]: cand_ws.set_column(col, col, 17, fmt['money'])
 
@@ -133,9 +159,9 @@ for col in [9, 10, 11, 17]: parent_ws.set_column(col, col, 18, fmt['money'])
 for col in [12, 13, 18, 20, 21]: parent_ws.set_column(col, col, 12, fmt['ratio'])
 for i, p in enumerate(parent_rows, 1):
     er = i + 1
-    formula(parent_ws, i, 8, f'=IFERROR(AVERAGEIFS({qsheet("91_BSR候选子体明细")}!$I$2:$I${cand_end},{qsheet("91_BSR候选子体明细")}!$A$2:$A${cand_end},A{er},{qsheet("91_BSR候选子体明细")}!$B$2:$B${cand_end},B{er}),"")', p['qAvg'], 'formula')
-    formula(parent_ws, i, 9, f'=IFERROR(AVERAGEIFS({qsheet("91_BSR候选子体明细")}!$J$2:$J${cand_end},{qsheet("91_BSR候选子体明细")}!$A$2:$A${cand_end},A{er},{qsheet("91_BSR候选子体明细")}!$B$2:$B${cand_end},B{er}),"")', p['tAvg'], 'formula_money')
-    formula(parent_ws, i, 10, f'=IFERROR(AVERAGEIFS({qsheet("91_BSR候选子体明细")}!$M$2:$M${cand_end},{qsheet("91_BSR候选子体明细")}!$A$2:$A${cand_end},A{er},{qsheet("91_BSR候选子体明细")}!$B$2:$B${cand_end},B{er}),"")', p['avgPrice'], 'formula_money')
+    formula(parent_ws, i, 8, f'=IFERROR(AVERAGEIFS({qsheet("91_BSR候选子体明细")}!$I$2:$I${cand_end},{qsheet("91_BSR候选子体明细")}!$A$2:$A${cand_end},A{er},{qsheet("91_BSR候选子体明细")}!$B$2:$B${cand_end},B{er},{qsheet("91_BSR候选子体明细")}!$I$2:$I${cand_end},">=0"),"")', p['qAvg'], 'formula')
+    formula(parent_ws, i, 9, f'=IFERROR(AVERAGEIFS({qsheet("91_BSR候选子体明细")}!$J$2:$J${cand_end},{qsheet("91_BSR候选子体明细")}!$A$2:$A${cand_end},A{er},{qsheet("91_BSR候选子体明细")}!$B$2:$B${cand_end},B{er},{qsheet("91_BSR候选子体明细")}!$J$2:$J${cand_end},">=0"),"")', p['tAvg'], 'formula_money')
+    formula(parent_ws, i, 10, f'=IFERROR(AVERAGEIFS({qsheet("91_BSR候选子体明细")}!$M$2:$M${cand_end},{qsheet("91_BSR候选子体明细")}!$A$2:$A${cand_end},A{er},{qsheet("91_BSR候选子体明细")}!$B$2:$B${cand_end},B{er},{qsheet("91_BSR候选子体明细")}!$M$2:$M${cand_end},">=0"),"")', p['avgPrice'], 'formula_money')
     formula(parent_ws, i, 11, f'=IFERROR(J{er}/I{er},"")', p['weightedPrice'], 'formula_money')
 
 # 01—04B monthly output. Core figures are formula-linked to 92; cached values come from model.
