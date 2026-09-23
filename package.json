@@ -25,7 +25,7 @@
     "build:parent": "node src/build_parent_source_delivery.mjs",
     "test:parent": "node tests/spec37_audit.mjs",
     "test:spec37": "node tests/spec37_audit.mjs",
-    "test:parent:formula": "node src/run_parent_formula_audit.mjs"
+    "test:parent:formula": "node tests/spec37_audit.mjs"
   },
   "dependencies": {
     "xlsx": "^0.18.5",
