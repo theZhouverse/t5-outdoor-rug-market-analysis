@@ -22,6 +22,7 @@
 - `outputs/20260920-new-source-parent-model/户外地垫市场分析-SPEC3.7-父体口径.html`：与Excel同批次的交互报告，含四部分、1.1—4.7定位、下拉导航、折叠、筛选、趋势图、父体回查和Excel下载。
 - `outputs/20260920-new-source-parent-model/户外地垫市场分析-SPEC3.7-父体口径.json`：供网页使用的公开汇总数据，不含原始明细快照。
 - `outputs/20260920-new-source-parent-model/完整审计结果-spec37.json`：源范围、模型、工作簿公式和网页的一致性审计摘要。
+- `outputs/20260920-new-source-parent-model/公式审计-spec37.json`：独立公式解释器对9,260个保存公式的求值结果和负值输入扰动结果。
 - `outputs/20260920-new-source-parent-model/构建清单-spec37.json`：本批次核心文件指纹。
 
 旧的 `户外地垫市场分析-SPEC3-父体口径*` 文件保留为历史输出，不能与当前 SPEC 3.7 数字混用。

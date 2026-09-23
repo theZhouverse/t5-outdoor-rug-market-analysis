@@ -75,6 +75,17 @@ class Engine:
  def compare(self,a,b,op):
   if a is None:a='' if isinstance(b,str) else 0
   if b is None:b='' if isinstance(a,str) else 0
+  # Excel criteria comparisons coerce numeric text (for example YYYYMM
+  # strings) when the criterion is numeric. Preserve ordinary text ordering
+  # for nonnumeric values.
+  if isinstance(a,str) and isnum(b):
+   try:a=float(a)
+   except ValueError:
+    return op == '<>'
+  if isnum(a) and isinstance(b,str):
+   try:b=float(b)
+   except ValueError:
+    return op == '<>'
   if isinstance(a,str) and isinstance(b,str):a=a.casefold();b=b.casefold()
   if type(a)!=type(b) and isinstance(a,str)!=isinstance(b,str):
    if op=='=':return False
@@ -124,8 +135,8 @@ class Engine:
     self.index[k]=ix
    if target not in self.index[k]:raise Error('N/A MATCH')
    return self.index[k][target]
-  if name in ['SUMIFS','COUNTIFS']:
-   offset=1 if name=='SUMIFS' else 0;criteria=[]
+  if name in ['SUMIFS','COUNTIFS','AVERAGEIFS']:
+   offset=1 if name in ['SUMIFS','AVERAGEIFS'] else 0;criteria=[]
    for i in range(offset,len(args),2):
     rg=self.range(args[i],s);criterion=self.eval(args[i+1],s);op='='
     if isinstance(criterion,str):
@@ -163,5 +174,9 @@ class Engine:
     if not matches:break
    if name=='COUNTIFS':return len(matches or [])
    sn,a,b,c,e=self.range(args[0],s)
-   return sum(v for pos in (matches or []) if isnum(v:=self.get(sn,a+pos,c)))
+   vals=[v for pos in (matches or []) if isnum(v:=self.get(sn,a+pos,c))]
+   if name=='AVERAGEIFS':
+    if not vals:raise Error('DIV/0')
+    return sum(vals)/len(vals)
+   return sum(vals)
   raise Error('UNSUPPORTED FUNCTION '+name)

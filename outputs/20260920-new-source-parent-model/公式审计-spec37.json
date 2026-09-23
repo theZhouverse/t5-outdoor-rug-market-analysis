@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "workbook": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.xlsx",
+  "savedFormulasEvaluated": 9260,
+  "engineEvaluations": 9261,
+  "cachedMismatches": 0,
+  "inputChanges": [
+    "negative Q excluded by parent >=0 formula criterion"
+  ],
+  "engine": "bounded independent evaluator; not desktop Excel"
+}
