@@ -194,10 +194,17 @@ for key, sheet_name in sheet_names.items():
             current_start, prior_start = '202601', '202501'
         else:
             current_start = prior_start = None
-        if current_start:
-            prior_end = f'{year - 1}{m[4:]}'
-            yoy_sales = f'=IF(AND(COUNTIFS($A$2:$A$25,">={current_start}",$A$2:$A$25,"<={m}",$B$2:$B$25,">=0")>0,COUNTIFS($A$2:$A$25,">={prior_start}",$A$2:$A$25,"<={prior_end}",$B$2:$B$25,">=0")>0),IFERROR(SUMIFS($B$2:$B$25,$A$2:$A$25,">={current_start}",$A$2:$A$25,"<={m}")/SUMIFS($B$2:$B$25,$A$2:$A$25,">={prior_start}",$A$2:$A$25,"<={prior_end}"),""),"")'
-            yoy_revenue = f'=IF(AND(COUNTIFS($A$2:$A$25,">={current_start}",$A$2:$A$25,"<={m}",$C$2:$C$25,">=0")>0,COUNTIFS($A$2:$A$25,">={prior_start}",$A$2:$A$25,"<={prior_end}",$C$2:$C$25,">=0")>0),IFERROR(SUMIFS($C$2:$C$25,$A$2:$A$25,">={current_start}",$A$2:$A$25,"<={m}")/SUMIFS($C$2:$C$25,$A$2:$A$25,">={prior_start}",$A$2:$A$25,"<={prior_end}"),""),"")'
+        prior_end = f'{year - 1}{m[4:]}' if current_start else None
+        if current_start and m >= current_start and prior_end in months:
+            current_start_row = months.index(current_start) + 2
+            prior_start_row = months.index(prior_start) + 2
+            prior_end_row = months.index(prior_end) + 2
+            current_q = f'$B${current_start_row}:$B${er}'
+            prior_q = f'$B${prior_start_row}:$B${prior_end_row}'
+            current_t = f'$C${current_start_row}:$C${er}'
+            prior_t = f'$C${prior_start_row}:$C${prior_end_row}'
+            yoy_sales = f'=IF(AND(SUM({current_q})>0,SUM({prior_q})>0),IFERROR(SUM({current_q})/SUM({prior_q}),""),"")'
+            yoy_revenue = f'=IF(AND(SUM({current_t})>0,SUM({prior_t})>0),IFERROR(SUM({current_t})/SUM({prior_t}),""),"")'
         else:
             yoy_sales = yoy_revenue = '=""'
         formula(s, i, 6, yoy_sales, rmodel['yoySales'], 'formula_ratio')
@@ -219,13 +226,18 @@ for i, (key, r) in enumerate(annual_keys, 1):
         monthly_sheet = sheet_names[key]
         current_start, current_end = r['months'][0], r['months'][-1]
         prior_start, prior_end = r['priorMonths'][0], r['priorMonths'][-1]
-        q_range = f'{qsheet(monthly_sheet)}!$B$2:$B$25'
-        revenue_range = f'{qsheet(monthly_sheet)}!$C$2:$C$25'
-        month_range = f'{qsheet(monthly_sheet)}!$A$2:$A$25'
-        formula(annual_ws, i, 4, f'=SUMIFS({q_range},{month_range},">={current_start}",{month_range},"<={current_end}")', r['sales'], 'formula')
-        formula(annual_ws, i, 5, f'=SUMIFS({q_range},{month_range},">={prior_start}",{month_range},"<={prior_end}")', r['priorSales'], 'formula')
-        formula(annual_ws, i, 6, f'=SUMIFS({revenue_range},{month_range},">={current_start}",{month_range},"<={current_end}")', r['revenue'], 'formula_money')
-        formula(annual_ws, i, 7, f'=SUMIFS({revenue_range},{month_range},">={prior_start}",{month_range},"<={prior_end}")', r['priorRevenue'], 'formula_money')
+        current_start_row = months.index(current_start) + 2
+        current_end_row = months.index(current_end) + 2
+        prior_start_row = months.index(prior_start) + 2
+        prior_end_row = months.index(prior_end) + 2
+        current_q = f'{qsheet(monthly_sheet)}!$B${current_start_row}:$B${current_end_row}'
+        prior_q = f'{qsheet(monthly_sheet)}!$B${prior_start_row}:$B${prior_end_row}'
+        current_t = f'{qsheet(monthly_sheet)}!$C${current_start_row}:$C${current_end_row}'
+        prior_t = f'{qsheet(monthly_sheet)}!$C${prior_start_row}:$C${prior_end_row}'
+        formula(annual_ws, i, 4, f'=SUM({current_q})', r['sales'], 'formula')
+        formula(annual_ws, i, 5, f'=SUM({prior_q})', r['priorSales'], 'formula')
+        formula(annual_ws, i, 6, f'=SUM({current_t})', r['revenue'], 'formula_money')
+        formula(annual_ws, i, 7, f'=SUM({prior_t})', r['priorRevenue'], 'formula_money')
         formula(annual_ws, i, 8, f'=IF(AND(ISNUMBER(E{i+1}),ISNUMBER(F{i+1})),IFERROR(E{i+1}/F{i+1},""),"")', r['yoySales'], 'formula_ratio')
         formula(annual_ws, i, 9, f'=IF(AND(ISNUMBER(G{i+1}),ISNUMBER(H{i+1})),IFERROR(G{i+1}/H{i+1},""),"")', r['yoyRevenue'], 'formula_ratio')
         formula(annual_ws, i, 10, f'=IF(AND(ISNUMBER(G{i+1}),ISNUMBER(E{i+1})),IFERROR(G{i+1}/E{i+1},""),"")', r['weightedPrice'], 'formula_money')
@@ -288,15 +300,23 @@ for i, ((key, band, m), cached) in enumerate(zip(bsr_row_keys, bsr_out), 1):
         current_start, prior_start = '202601', '202501'
     else:
         current_start = prior_start = None
-    if current_start:
-        prior_end = f'{year - 1}{m[4:]}'
-        yoy_sales = f'=IF(AND(COUNTIFS($A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={current_start}",$B$2:$B${len(bsr_out)+1},"<={m}",$D$2:$D${len(bsr_out)+1},">=0")>0,COUNTIFS($A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={prior_start}",$B$2:$B${len(bsr_out)+1},"<={prior_end}",$D$2:$D${len(bsr_out)+1},">=0")>0),IFERROR(SUMIFS($D$2:$D${len(bsr_out)+1},$A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={current_start}",$B$2:$B${len(bsr_out)+1},"<={m}")/SUMIFS($D$2:$D${len(bsr_out)+1},$A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={prior_start}",$B$2:$B${len(bsr_out)+1},"<={prior_end}"),""),"")'
-        yoy_revenue = f'=IF(AND(COUNTIFS($A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={current_start}",$B$2:$B${len(bsr_out)+1},"<={m}",$E$2:$E${len(bsr_out)+1},">=0")>0,COUNTIFS($A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={prior_start}",$B$2:$B${len(bsr_out)+1},"<={prior_end}",$E$2:$E${len(bsr_out)+1},">=0")>0),IFERROR(SUMIFS($E$2:$E${len(bsr_out)+1},$A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={current_start}",$B$2:$B${len(bsr_out)+1},"<={m}")/SUMIFS($E$2:$E${len(bsr_out)+1},$A$2:$A${len(bsr_out)+1},A{er},$C$2:$C${len(bsr_out)+1},C{er},$B$2:$B${len(bsr_out)+1},">={prior_start}",$B$2:$B${len(bsr_out)+1},"<={prior_end}"),""),"")'
+    prior_end = f'{year - 1}{m[4:]}' if current_start else None
+    prior_end_key = (key, band, prior_end) if prior_end else None
+    if current_start and m >= current_start and prior_end_key in bsr_map:
+        current_start_row = bsr_map[(key, band, current_start)]
+        prior_start_row = bsr_map[(key, band, prior_start)]
+        prior_end_row = bsr_map[prior_end_key]
+        current_q = f'$D${current_start_row}:$D${er}'
+        prior_q = f'$D${prior_start_row}:$D${prior_end_row}'
+        current_t = f'$E${current_start_row}:$E${er}'
+        prior_t = f'$E${prior_start_row}:$E${prior_end_row}'
+        yoy_sales = f'=IF(AND(SUM({current_q})>0,SUM({prior_q})>0),IFERROR(SUM({current_q})/SUM({prior_q}),""),"")'
+        yoy_revenue = f'=IF(AND(SUM({current_t})>0,SUM({prior_t})>0),IFERROR(SUM({current_t})/SUM({prior_t}),""),"")'
     else:
         yoy_sales = yoy_revenue = '=""'
     formula(bsr_ws, i, 10, yoy_sales, cached[10], 'formula_ratio')
     formula(bsr_ws, i, 11, f'=IF(AND(ISNUMBER(E{er}),ISNUMBER(E{bsr_map[prior_key]})),IFERROR(E{er}/E{bsr_map[prior_key]},""),"")' if prior_key in bsr_map else '=""', cached[11], 'formula_ratio')
-    if current_start:
+    if current_start and m >= current_start and prior_end_key in bsr_map:
         formula(bsr_ws, i, 12, yoy_revenue, cached[12], 'formula_ratio')
     else:
         formula(bsr_ws, i, 12, '=""', cached[12], 'formula_ratio')

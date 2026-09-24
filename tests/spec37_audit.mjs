@@ -79,14 +79,16 @@ assert.deepEqual(book.SheetNames, expectedSheets);
 const monthly = book.Sheets['01_整体市场月度'];
 assert.ok(monthly.B2?.f?.includes('SUMIFS'));
 assert.ok(monthly.F14?.f?.includes('B14/B2'));
-assert.ok(monthly.G14?.f?.includes('SUMIFS'));
+assert.ok(monthly.G14?.f?.includes('SUM($B$14:$B$14)>0'));
+assert.ok(monthly.G14?.f?.includes('SUM($B$14:$B$14)/SUM($B$2:$B$2)'));
 assert.ok(book.Sheets['92_父体月度汇总'].I2?.f?.includes('AVERAGEIFS'));
 assert.ok(book.Sheets['92_父体月度汇总'].J2?.f?.includes('AVERAGEIFS'));
 assert.ok(book.Sheets['92_父体月度汇总'].I2?.f?.includes('>=0'));
 assert.ok(book.Sheets['92_父体月度汇总'].J2?.f?.includes('>=0'));
 assert.ok(book.Sheets['06_BSR分层'].D2?.f?.includes('AVERAGEIFS'));
+assert.ok(book.Sheets['06_BSR分层'].K14?.f?.includes('SUM($D$14:$D$14)/SUM($D$2:$D$2)'));
 assert.ok(book.Sheets['06_BSR分层'].A364?.v === 'BSR值组明细（公式来源）');
-assert.ok(book.Sheets['05_年度YOY'].E3?.f?.includes('SUMIFS'));
+assert.ok(book.Sheets['05_年度YOY'].E3?.f?.includes("SUM('01_整体市场月度'!$B$14:$B$18)"));
 assert.ok(book.Sheets['05_年度YOY'].I3?.f?.includes('E3/F3'));
 assert.ok(book.Sheets['00_数据总览'].C25?.l?.Target?.includes('01_整体市场月度'), '00 overview missing internal sheet link');
 for (const sheetName of ['90_原始输入', '91_BSR候选子体明细']) {
@@ -97,6 +99,7 @@ for (const sheetName of book.SheetNames) {
   for (const cell of Object.values(book.Sheets[sheetName])) {
     if (!cell || typeof cell !== 'object') continue;
     assert.ok(!['#REF!', '#DIV/0!', '#VALUE!', '#N/A'].includes(cell.v), `${sheetName} cached formula error`);
+    if (cell.f) assert.ok(!/[<>]=202[456]\d{2}/.test(cell.f), `${sheetName} uses text-month range criteria that WPS recalculates as blank`);
   }
 }
 

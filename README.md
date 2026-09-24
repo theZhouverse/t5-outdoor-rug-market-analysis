@@ -1,6 +1,6 @@
 # 户外地垫市场分析
 
-当前有效规范是 [SPEC 3.7](docs/SPEC.md)。父体主指标按月份+父ASIN计算Q/T平均；BSR按月份+BSR值计算Q/T平均，再按三档输出。旧Excel、HTML和JSON需要按3.7重新构建后才能作为最终数字交付。详细处理步骤和人工复算方法见 [数据处理流程与人工验算](docs/数据处理流程与人工验算-20260922.md)，执行与审查记录见 [TASKS](docs/TASKS.md) 和 [REVIEWS](docs/REVIEWS.md)。
+当前有效规范是 [SPEC 3.7](docs/SPEC.md)。父体主指标按月份+父ASIN计算Q/T平均；BSR按月份+BSR值计算Q/T平均，再按三档输出。当前Excel、HTML、JSON、Markdown与构建清单已经按同一SPEC 3.7批次重建并完成本地验收；旧版本只作历史追溯。详细处理步骤和人工复算方法见 [数据处理流程与人工验算](docs/数据处理流程与人工验算-20260922.md)，执行与审查记录见 [TASKS](docs/TASKS.md) 和 [REVIEWS](docs/REVIEWS.md)。
 
 ## 当前有效口径
 
@@ -22,7 +22,7 @@
 - `outputs/20260920-new-source-parent-model/户外地垫市场分析-SPEC3.7-父体口径.html`：与Excel同批次的交互报告，含四部分、1.1—4.7定位、下拉导航、折叠、筛选、趋势图、父体回查和Excel下载。
 - `outputs/20260920-new-source-parent-model/户外地垫市场分析-SPEC3.7-父体口径.json`：供网页使用的公开汇总数据，不含原始明细快照。
 - `outputs/20260920-new-source-parent-model/完整审计结果-spec37.json`：源范围、模型、工作簿公式和网页的一致性审计摘要。
-- `outputs/20260920-new-source-parent-model/公式审计-spec37.json`：独立公式解释器对9,260个保存公式的求值结果和负值输入扰动结果。
+- `outputs/20260920-new-source-parent-model/公式审计-spec37.json`：独立公式解释器对9,260个保存公式的求值结果，以及Q/T负值、空白和明确0共六类输入扰动结果。
 - `outputs/20260920-new-source-parent-model/构建清单-spec37.json`：本批次核心文件指纹。
 
 旧的 `户外地垫市场分析-SPEC3-父体口径*` 文件保留为历史输出，不能与当前 SPEC 3.7 数字混用。
@@ -39,4 +39,4 @@ npm run test:parent:formula
 
 `npm run test:parent`会独立重新读取24个源文件，核对46,780条候选行、月份+父ASIN的Q/T平均、46,854条BSR观察记录、月份+BSR值平均、三档汇总、PP/高客单价回加、去年同月MOM、共同月份年度YOY、XLSX公式缓存和HTML批次。
 
-本机完整工作簿通过XlsxWriter生成。Artifact Tool导入15MB完整簿耗时过长，因此只用它做代表页的裁剪预览；公式正确性由独立公式解释器与模型逐项核对。桌面Excel整簿重算是单独的人工验收层，不用本地测试结果冒充。
+本机完整工作簿通过XlsxWriter生成，当前文件为8,339,360字节。独立公式解释器逐项核对公式与模型；WPS表格12.0已在临时副本上执行完整重算并保存，保存后的副本再次通过9,260个公式审计。Artifact Tool对16个工作表的顶部数据区逐表渲染，浏览器另验收HTML主题、折叠、年份筛选和父体检索。本机没有Microsoft Excel，因此WPS目标引擎验证不表述为Microsoft Excel桌面版验收。

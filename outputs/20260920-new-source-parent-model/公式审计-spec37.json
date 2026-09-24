@@ -2,10 +2,15 @@
   "status": "PASS",
   "workbook": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.xlsx",
   "savedFormulasEvaluated": 9260,
-  "engineEvaluations": 9261,
+  "engineEvaluations": 10778,
   "cachedMismatches": 0,
   "inputChanges": [
-    "negative Q excluded by parent >=0 formula criterion"
+    "negative Q excluded and monthly sales recalculated",
+    "blank Q excluded and monthly sales recalculated",
+    "explicit zero Q included and monthly sales recalculated",
+    "negative T excluded and monthly revenue recalculated",
+    "blank T excluded and monthly revenue recalculated",
+    "explicit zero T included and monthly revenue recalculated"
   ],
   "engine": "bounded independent evaluator; not desktop Excel"
 }
