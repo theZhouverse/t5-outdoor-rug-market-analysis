@@ -25,7 +25,7 @@ assert.equal(saved.metadata.batchId, model.metadata.batchId);
 assert.equal(json.metadata.batchId, model.metadata.batchId);
 assert.deepEqual(embedded, json, 'HTML report-data differs from delivery JSON');
 assert.ok(html.includes('SPEC 3.7'));
-assert.ok(html.includes('MOM为本月÷去年同月'));
+assert.ok(html.includes('MOM=(本月÷去年同月)-1'));
 assert.ok(!html.includes('销量MOM（上月）'));
 
 // Candidate scope uses BSR only and preserves multi-rank observations.
@@ -40,16 +40,27 @@ assert.equal(sampleRows.length, 69);
 assert.equal(sample.qAvg, sampleRows.filter((r) => Number.isFinite(r.sales) && r.sales >= 0).reduce((a, r) => a + r.sales, 0) / 69);
 assert.equal(sample.tAvg, sampleRows.filter((r) => Number.isFinite(r.sourceRevenue) && r.sourceRevenue >= 0).reduce((a, r) => a + r.sourceRevenue, 0) / 69);
 
-// BSR branch is month + BSR and ignores ASIN. Tier values average BSR-value averages.
+// BSR branch is parent-first: each month + BSR + parent group is averaged,
+// then parent averages are summed into the BSR-value result. Tier values still
+// average the resulting BSR-value totals.
 const bsrGroups = model.bsr.overall.groups;
 const group = bsrGroups.find((r) => r.month === '202607' && r.bsr === 10);
 assert.ok(group);
 const groupObs = model.observations.filter((r) => r.month === '202607' && r.rank === 10);
 assert.equal(group.observationCount, groupObs.length);
-const validQ = groupObs.filter((r) => Number.isFinite(r.sales) && r.sales >= 0).map((r) => r.sales);
-const validT = groupObs.filter((r) => Number.isFinite(r.sourceRevenue) && r.sourceRevenue >= 0).map((r) => r.sourceRevenue);
-assert.ok(close(group.qAvg, validQ.reduce((a, b) => a + b, 0) / validQ.length));
-assert.ok(close(group.tAvg, validT.reduce((a, b) => a + b, 0) / validT.length));
+const parentGroupKeys = [...new Set(groupObs.map((r) => r.parentKey))];
+const parentQ = parentGroupKeys.map((parentKey) => {
+  const values = groupObs.filter((r) => r.parentKey === parentKey).map((r) => r.sales).filter((v) => Number.isFinite(v) && v >= 0);
+  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+}).filter(Number.isFinite);
+const parentT = parentGroupKeys.map((parentKey) => {
+  const values = groupObs.filter((r) => r.parentKey === parentKey).map((r) => r.sourceRevenue).filter((v) => Number.isFinite(v) && v >= 0);
+  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+}).filter(Number.isFinite);
+assert.ok(close(group.qAvg, parentQ.reduce((a, b) => a + b, 0)));
+assert.ok(close(group.tAvg, parentT.reduce((a, b) => a + b, 0)));
+const sample202506Bsr28 = bsrGroups.find((r) => r.month === '202506' && r.bsr === 28);
+assert.deepEqual({ qAvg: sample202506Bsr28.qAvg, tAvg: sample202506Bsr28.tAvg }, { qAvg: 5109, tAvg: 913380 });
 const head = model.bsr.overall.tiers.head.find((r) => r.month === '202607');
 const headGroups = bsrGroups.filter((r) => r.month === '202607' && r.bsr >= 1 && r.bsr <= 20);
 assert.ok(close(head.sales, headGroups.reduce((a, r) => a + (r.qAvg ?? 0), 0) / headGroups.filter((r) => Number.isFinite(r.qAvg)).length));
@@ -61,35 +72,44 @@ const ppGroup = model.bsr.pp.groups.find((r) => r.month === '202607' && Number.i
 assert.ok(ppGroup);
 const ppObs = model.observations.filter((r) => r.month === ppGroup.month && r.rank === ppGroup.bsr && parentMap.get(`${r.month}|${r.parentKey}`)?.pp);
 assert.equal(ppGroup.observationCount, ppObs.length);
-assert.ok(close(ppGroup.qAvg, ppObs.filter((r) => Number.isFinite(r.sales) && r.sales >= 0).reduce((a, r) => a + r.sales, 0) / ppObs.filter((r) => Number.isFinite(r.sales) && r.sales >= 0).length));
+const ppParents = [...new Set(ppObs.map((r) => r.parentKey))].map((parentKey) => ppObs.filter((r) => r.parentKey === parentKey).map((r) => r.sales).filter((v) => Number.isFinite(v) && v >= 0)).map((values) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null).filter(Number.isFinite);
+assert.ok(close(ppGroup.qAvg, ppParents.reduce((a, b) => a + b, 0)));
 
-// MOM is same-month prior-year ratio; monthly YOY is common-month cumulative ratio.
+// MOM is same-month prior-year ratio minus one; monthly YOY is common-month cumulative ratio minus one.
 const sep2025 = model.summaries.overall.find((r) => r.month === '202509');
 const sep2024 = model.summaries.overall.find((r) => r.month === '202409');
-assert.ok(close(sep2025.momSales, sep2025.sales / sep2024.sales));
+assert.ok(close(sep2025.momSales, sep2025.sales / sep2024.sales - 1));
 const annual2025 = model.annual.overall.find((r) => r.year === '2025');
 const annual2026 = model.annual.overall.find((r) => r.year === '2026');
 assert.deepEqual(annual2025.months, ['202508', '202509', '202510', '202511', '202512']);
 assert.deepEqual(annual2026.months, ['202601', '202602', '202603', '202604', '202605', '202606', '202607']);
-assert.ok(close(annual2025.yoySales, annual2025.sales / annual2025.priorSales));
-assert.ok(close(annual2026.yoySales, annual2026.sales / annual2026.priorSales));
+assert.ok(close(annual2025.yoySales, annual2025.sales / annual2025.priorSales - 1));
+assert.ok(close(annual2026.yoySales, annual2026.sales / annual2026.priorSales - 1));
 
 const expectedSheets = ['00_数据总览', '01_整体市场月度', '02_PP市场月度', '03_高客单价市场月度', '04_Genimo品牌月度', '04B_Genimo_PP月度', '05_年度YOY', '06_BSR分层', '07_父体冲突诊断', '08_2027策略', '09_勾稽检查', '90_原始输入', '91_BSR候选子体明细', '92_父体月度汇总', '93_来源登记', '94_规则说明'];
 assert.deepEqual(book.SheetNames, expectedSheets);
 const monthly = book.Sheets['01_整体市场月度'];
 assert.ok(monthly.B2?.f?.includes('SUMIFS'));
-assert.ok(monthly.F14?.f?.includes('B14/B2'));
+assert.ok(monthly.F14?.f?.includes('B14/B2-1'));
 assert.ok(monthly.G14?.f?.includes('SUM($B$14:$B$14)>0'));
-assert.ok(monthly.G14?.f?.includes('SUM($B$14:$B$14)/SUM($B$2:$B$2)'));
+assert.ok(monthly.G14?.f?.includes('SUM($B$14:$B$14)/SUM($B$2:$B$2)-1'));
 assert.ok(book.Sheets['92_父体月度汇总'].I2?.f?.includes('AVERAGEIFS'));
 assert.ok(book.Sheets['92_父体月度汇总'].J2?.f?.includes('AVERAGEIFS'));
 assert.ok(book.Sheets['92_父体月度汇总'].I2?.f?.includes('>=0'));
 assert.ok(book.Sheets['92_父体月度汇总'].J2?.f?.includes('>=0'));
 assert.ok(book.Sheets['06_BSR分层'].D2?.f?.includes('AVERAGEIFS'));
-assert.ok(book.Sheets['06_BSR分层'].K14?.f?.includes('SUM($D$14:$D$14)/SUM($D$2:$D$2)'));
+assert.ok(book.Sheets['06_BSR分层'].K14?.f?.includes('SUM($D$14:$D$14)/SUM($D$2:$D$2)-1'));
+assert.equal(book.Sheets['01_整体市场月度'].F14?.z, '0.00%');
+assert.equal(book.Sheets['05_年度YOY'].I3?.z, '0.00%');
+assert.equal(book.Sheets['06_BSR分层'].J14?.z, '0.00%');
+const bsrRows = XLSX.utils.sheet_to_json(book.Sheets['06_BSR分层'], { header: 1, raw: true });
+const bsr28 = bsrRows.find((row) => row[0] === '整体市场' && String(row[1]) === '202506' && Number(row[2]) === 28);
+assert.deepEqual(bsr28?.slice(0, 5), ['整体市场', '202506', 28, 5109, 913380]);
+assert.ok(close(bsr28?.[5], 147.27833333333334));
+assert.ok(close(bsr28?.[6], 178.77862595419847));
 assert.ok(book.Sheets['06_BSR分层'].A364?.v === 'BSR值组明细（公式来源）');
 assert.ok(book.Sheets['05_年度YOY'].E3?.f?.includes("SUM('01_整体市场月度'!$B$14:$B$18)"));
-assert.ok(book.Sheets['05_年度YOY'].I3?.f?.includes('E3/F3'));
+assert.ok(book.Sheets['05_年度YOY'].I3?.f?.includes('E3/F3-1'));
 assert.ok(book.Sheets['00_数据总览'].C25?.l?.Target?.includes('01_整体市场月度'), '00 overview missing internal sheet link');
 for (const sheetName of ['90_原始输入', '91_BSR候选子体明细']) {
   const headers = XLSX.utils.sheet_to_json(book.Sheets[sheetName], { header: 1, range: 0, raw: true })[0] ?? [];

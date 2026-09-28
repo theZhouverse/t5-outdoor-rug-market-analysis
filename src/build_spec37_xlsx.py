@@ -13,7 +13,7 @@ OUT = Path(os.environ.get('SPEC37_XLSX_OUT', str(OUT_DIR / '户外地垫市场�
 OUT.parent.mkdir(parents=True, exist_ok=True)
 
 wb = xlsxwriter.Workbook(str(OUT), {'constant_memory': False, 'strings_to_urls': False, 'nan_inf_to_errors': True})
-wb.set_properties({'title': '户外地垫市场分析 SPEC 3.7', 'subject': '父体Q/T平均与BSR月份+BSR值平均', 'author': 'Codex'})
+wb.set_properties({'title': '户外地垫市场分析 SPEC 3.7', 'subject': '父体Q/T平均与BSR父体先平均后求和', 'author': 'Codex'})
 
 fmt = {
     'title': wb.add_format({'bold': True, 'font_size': 15, 'font_color': '#FFFFFF', 'bg_color': '#1F2937'}),
@@ -24,9 +24,11 @@ fmt = {
     'money': wb.add_format({'border': 1, 'num_format': '$#,##0.00'}),
     'int': wb.add_format({'border': 1, 'num_format': '#,##0'}),
     'ratio': wb.add_format({'border': 1, 'num_format': '0.00x'}),
+    'pct': wb.add_format({'border': 1, 'num_format': '0.00%'}),
     'formula': wb.add_format({'border': 1, 'bg_color': '#F8FAFC', 'num_format': '#,##0.00'}),
     'formula_money': wb.add_format({'border': 1, 'bg_color': '#F8FAFC', 'num_format': '$#,##0.00'}),
     'formula_ratio': wb.add_format({'border': 1, 'bg_color': '#F8FAFC', 'num_format': '0.00x'}),
+    'formula_pct': wb.add_format({'border': 1, 'bg_color': '#F8FAFC', 'num_format': '0.00%'}),
     'formula_int': wb.add_format({'border': 1, 'bg_color': '#F8FAFC', 'num_format': '#,##0'}),
     'note': wb.add_format({'text_wrap': True, 'valign': 'top', 'bg_color': '#FFF7ED', 'border': 1}),
 }
@@ -97,8 +99,8 @@ ws.merge_range('A16:C16', '共同规则', fmt['section'])
 notes = [
     '候选池只看小类BSR是否有1—100有效排名，小类目名称只保留回勾。',
     '父体主指标按月份+父ASIN，对Q列月销量和T列月销售额分别取有效非负值平均。',
-    'BSR独立按月份+BSR值汇总，忽略ASIN；同月同BSR的Q/T取平均，再按1—20、21—50、51—100三档。',
-    'MOM=本月÷去年同月；YOY=本年与上一年共同覆盖月份汇总相除，均不减1。',
+    'BSR先按月份+BSR值+父ASIN对Q/T取平均，再对父体平均结果求和，最后按1—20、21—50、51—100三档。',
+    'MOM=(本月÷去年同月)-1；YOY=(本年与上一年共同覆盖月份汇总相除)-1，按百分比显示。',
     '子体销量和子体销售额只作为覆盖与诊断指标；本批次不计算利润。',
 ]
 for i, note in enumerate(notes, 16): ws.merge_range(i, 0, i, 2, note, fmt['note'])
@@ -114,7 +116,7 @@ sheet_links = [
     ('04_Genimo品牌月度', '第四部分：Genimo整体品牌结果'),
     ('04B_Genimo_PP月度', 'Genimo在PP市场的辅助范围'),
     ('05_年度YOY', '共同月份年度YOY分子分母'),
-    ('06_BSR分层', 'BSR月份+BSR值平均及三档'),
+    ('06_BSR分层', 'BSR父体先平均后求和及三档'),
     ('07_父体冲突诊断', 'Q/T多值与分类冲突回查'),
     ('08_2027策略', '数据依据和2027建议'),
     ('09_勾稽检查', 'PP+高客单价回加检查'),
@@ -185,8 +187,8 @@ for key, sheet_name in sheet_names.items():
         formula(s, i, 4, f'=IFERROR(C{er}/B{er},"")', rmodel['weightedPrice'], 'formula_money')
         prior = f'{int(m[:4]) - 1}{m[4:]}'
         pi = months.index(prior) if prior in months else None
-        formula(s, i, 5, f'=IF(AND(ISNUMBER(B{er}),ISNUMBER(B{pi + 2})),IFERROR(B{er}/B{pi + 2},""),"")' if pi is not None else '=""', rmodel['momSales'], 'formula_ratio')
-        formula(s, i, 7, f'=IF(AND(ISNUMBER(C{er}),ISNUMBER(C{pi + 2})),IFERROR(C{er}/C{pi + 2},""),"")' if pi is not None else '=""', rmodel['momRevenue'], 'formula_ratio')
+        formula(s, i, 5, f'=IF(AND(ISNUMBER(B{er}),ISNUMBER(B{pi + 2})),IFERROR(B{er}/B{pi + 2}-1,""),"")' if pi is not None else '=""', rmodel['momSales'], 'formula_pct')
+        formula(s, i, 7, f'=IF(AND(ISNUMBER(C{er}),ISNUMBER(C{pi + 2})),IFERROR(C{er}/C{pi + 2}-1,""),"")' if pi is not None else '=""', rmodel['momRevenue'], 'formula_pct')
         year = int(m[:4])
         if year == 2025:
             current_start, prior_start = '202508', '202408'
@@ -203,12 +205,12 @@ for key, sheet_name in sheet_names.items():
             prior_q = f'$B${prior_start_row}:$B${prior_end_row}'
             current_t = f'$C${current_start_row}:$C${er}'
             prior_t = f'$C${prior_start_row}:$C${prior_end_row}'
-            yoy_sales = f'=IF(AND(SUM({current_q})>0,SUM({prior_q})>0),IFERROR(SUM({current_q})/SUM({prior_q}),""),"")'
-            yoy_revenue = f'=IF(AND(SUM({current_t})>0,SUM({prior_t})>0),IFERROR(SUM({current_t})/SUM({prior_t}),""),"")'
+            yoy_sales = f'=IF(AND(SUM({current_q})>0,SUM({prior_q})>0),IFERROR(SUM({current_q})/SUM({prior_q})-1,""),"")'
+            yoy_revenue = f'=IF(AND(SUM({current_t})>0,SUM({prior_t})>0),IFERROR(SUM({current_t})/SUM({prior_t})-1,""),"")'
         else:
             yoy_sales = yoy_revenue = '=""'
-        formula(s, i, 6, yoy_sales, rmodel['yoySales'], 'formula_ratio')
-        formula(s, i, 8, yoy_revenue, rmodel['yoyRevenue'], 'formula_ratio')
+        formula(s, i, 6, yoy_sales, rmodel['yoySales'], 'formula_pct')
+        formula(s, i, 8, yoy_revenue, rmodel['yoyRevenue'], 'formula_pct')
 
 # 05 annual
 annual_out = []
@@ -220,7 +222,7 @@ for key in ['overall', 'pp', 'high', 'genimo']:
 annual_ws = write_table('05_年度YOY', ['范围', '年份', '本期共同月份', '基期共同月份', '本期销量', '基期销量', '本期销售额($)', '基期销售额($)', '销量YOY', '销售额YOY', '本期加权成交均价($)', '期间状态'], annual_out, [18, 10, 34, 34, 16, 16, 18, 18, 12, 14, 20, 16])
 for col in [4, 5]: annual_ws.set_column(col, col, 16, fmt['num'])
 for col in [6, 7, 10]: annual_ws.set_column(col, col, 18, fmt['money'])
-for col in [8, 9]: annual_ws.set_column(col, col, 14, fmt['ratio'])
+for col in [8, 9]: annual_ws.set_column(col, col, 14, fmt['pct'])
 for i, (key, r) in enumerate(annual_keys, 1):
     if r['months']:
         monthly_sheet = sheet_names[key]
@@ -238,8 +240,8 @@ for i, (key, r) in enumerate(annual_keys, 1):
         formula(annual_ws, i, 5, f'=SUM({prior_q})', r['priorSales'], 'formula')
         formula(annual_ws, i, 6, f'=SUM({current_t})', r['revenue'], 'formula_money')
         formula(annual_ws, i, 7, f'=SUM({prior_t})', r['priorRevenue'], 'formula_money')
-        formula(annual_ws, i, 8, f'=IF(AND(ISNUMBER(E{i+1}),ISNUMBER(F{i+1})),IFERROR(E{i+1}/F{i+1},""),"")', r['yoySales'], 'formula_ratio')
-        formula(annual_ws, i, 9, f'=IF(AND(ISNUMBER(G{i+1}),ISNUMBER(H{i+1})),IFERROR(G{i+1}/H{i+1},""),"")', r['yoyRevenue'], 'formula_ratio')
+        formula(annual_ws, i, 8, f'=IF(AND(ISNUMBER(E{i+1}),ISNUMBER(F{i+1})),IFERROR(E{i+1}/F{i+1}-1,""),"")', r['yoySales'], 'formula_pct')
+        formula(annual_ws, i, 9, f'=IF(AND(ISNUMBER(G{i+1}),ISNUMBER(H{i+1})),IFERROR(G{i+1}/H{i+1}-1,""),"")', r['yoyRevenue'], 'formula_pct')
         formula(annual_ws, i, 10, f'=IF(AND(ISNUMBER(G{i+1}),ISNUMBER(E{i+1})),IFERROR(G{i+1}/E{i+1},""),"")', r['weightedPrice'], 'formula_money')
     else:
         for c in [4, 5, 6, 7, 8, 9, 10]: formula(annual_ws, i, c, '=""', None, 'formula')
@@ -256,7 +258,7 @@ for key in ['overall', 'pp', 'high', 'genimo', 'genimoPP']:
 bsr_ws = write_table('06_BSR分层', ['范围', '月份', 'BSR档位', '月销量', '月销售额($)', '平均标价($)', '加权成交均价($)', 'BSR值组数', 'BSR观察记录数', '销量MOM', '销量YOY', '销售额MOM', '销售额YOY'], bsr_out, [18, 12, 16, 16, 18, 16, 18, 12, 16, 12, 12, 14, 14])
 for col in [3, 7, 8]: bsr_ws.set_column(col, col, 16, fmt['int'])
 for col in [4, 5, 6]: bsr_ws.set_column(col, col, 18, fmt['money'])
-for col in [9, 10, 11, 12]: bsr_ws.set_column(col, col, 14, fmt['ratio'])
+for col in [9, 10, 11, 12]: bsr_ws.set_column(col, col, 14, fmt['pct'])
 
 # BSR value groups are shown below the business table so every tier result can be traced to formula inputs.
 group_headers_row = len(bsr_out) + 3
@@ -292,7 +294,7 @@ for i, ((key, band, m), cached) in enumerate(zip(bsr_row_keys, bsr_out), 1):
     formula(bsr_ws, i, 6, f'=IF(AND(ISNUMBER(D{er}),ISNUMBER(E{er})),IFERROR(E{er}/D{er},""),"")', cached[6], 'formula_money')
     prior = f'{int(m[:4]) - 1}{m[4:]}'
     prior_key = (key, band, prior)
-    formula(bsr_ws, i, 9, f'=IF(AND(ISNUMBER(D{er}),ISNUMBER(D{bsr_map[prior_key]})),IFERROR(D{er}/D{bsr_map[prior_key]},""),"")' if prior_key in bsr_map else '=""', cached[9], 'formula_ratio')
+    formula(bsr_ws, i, 9, f'=IF(AND(ISNUMBER(D{er}),ISNUMBER(D{bsr_map[prior_key]})),IFERROR(D{er}/D{bsr_map[prior_key]}-1,""),"")' if prior_key in bsr_map else '=""', cached[9], 'formula_pct')
     year = int(m[:4])
     if year == 2025:
         current_start, prior_start = '202508', '202408'
@@ -310,24 +312,24 @@ for i, ((key, band, m), cached) in enumerate(zip(bsr_row_keys, bsr_out), 1):
         prior_q = f'$D${prior_start_row}:$D${prior_end_row}'
         current_t = f'$E${current_start_row}:$E${er}'
         prior_t = f'$E${prior_start_row}:$E${prior_end_row}'
-        yoy_sales = f'=IF(AND(SUM({current_q})>0,SUM({prior_q})>0),IFERROR(SUM({current_q})/SUM({prior_q}),""),"")'
-        yoy_revenue = f'=IF(AND(SUM({current_t})>0,SUM({prior_t})>0),IFERROR(SUM({current_t})/SUM({prior_t}),""),"")'
+        yoy_sales = f'=IF(AND(SUM({current_q})>0,SUM({prior_q})>0),IFERROR(SUM({current_q})/SUM({prior_q})-1,""),"")'
+        yoy_revenue = f'=IF(AND(SUM({current_t})>0,SUM({prior_t})>0),IFERROR(SUM({current_t})/SUM({prior_t})-1,""),"")'
     else:
         yoy_sales = yoy_revenue = '=""'
-    formula(bsr_ws, i, 10, yoy_sales, cached[10], 'formula_ratio')
-    formula(bsr_ws, i, 11, f'=IF(AND(ISNUMBER(E{er}),ISNUMBER(E{bsr_map[prior_key]})),IFERROR(E{er}/E{bsr_map[prior_key]},""),"")' if prior_key in bsr_map else '=""', cached[11], 'formula_ratio')
+    formula(bsr_ws, i, 10, yoy_sales, cached[10], 'formula_pct')
+    formula(bsr_ws, i, 11, f'=IF(AND(ISNUMBER(E{er}),ISNUMBER(E{bsr_map[prior_key]})),IFERROR(E{er}/E{bsr_map[prior_key]}-1,""),"")' if prior_key in bsr_map else '=""', cached[11], 'formula_pct')
     if current_start and m >= current_start and prior_end_key in bsr_map:
-        formula(bsr_ws, i, 12, yoy_revenue, cached[12], 'formula_ratio')
+        formula(bsr_ws, i, 12, yoy_revenue, cached[12], 'formula_pct')
     else:
-        formula(bsr_ws, i, 12, '=""', cached[12], 'formula_ratio')
+        formula(bsr_ws, i, 12, '=""', cached[12], 'formula_pct')
 
 # 07—09
 conflict_out = [[p['month'], p['parentKey'], p['candidateRows'], p['qValidRows'], p['qMin'], p['qMax'], p['qUnique'], p['tValidRows'], p['tMin'], p['tMax'], p['tUnique'], 'Q多值' if p['qConflict'] else '', 'T多值' if p['tConflict'] else '', p['ppStatus'], p['genimoStatus']] for p in parent_rows if p['qConflict'] or p['tConflict'] or p['ppStatus'] == 'TIE' or p['genimoStatus'] == 'TIE']
 write_table('07_父体冲突诊断', ['月份', '父体键', '候选行数', 'Q有效行数', 'Q最小值', 'Q最大值', 'Q不同值数', 'T有效行数', 'T最小值', 'T最大值', 'T不同值数', 'Q状态', 'T状态', 'PP状态', 'Genimo状态'], conflict_out, [10, 20, 12, 12, 14, 14, 12, 12, 16, 16, 12, 12, 12, 12, 14])
 write_table('08_2027策略', ['范围', '指标', '结果', '2027建议'], [
-    ['整体市场', '月度MOM/年度YOY', '见01、05页', '按相同父体和BSR口径持续追踪；比较倍数低于1时先复核覆盖与源值冲突。'],
-    ['PP市场', 'BSR三档', '见06页', '按头部、中部、尾部的销量和销售额比较倍数选择小批测款档位。'],
-    ['高客单价市场', 'BSR三档', '见06页', '单独观察非PP补集的销量、销售额和均价，不用PP趋势代替。'],
+    ['整体市场', '月度MOM/年度YOY', '见01、05页', '按相同父体和BSR口径持续追踪；百分比变化异常时先复核覆盖与源值冲突。'],
+    ['PP市场', 'BSR三档', '见06页', '按头部、中部、尾部的销量和销售额及其百分比变化选择小批测款档位。'],
+    ['高客单价市场', 'BSR三档', '见06页', '单独观察非PP补集的销量、销售额、百分比变化和均价，不用PP趋势代替。'],
     ['Genimo', '整体/PP份额', '见04、04B页', '以整体份额和PP内份额为基线，连续追踪后再安排链接扩展。'],
 ], [18, 22, 18, 76])
 checks = []
@@ -343,11 +345,11 @@ write_table('94_规则说明', ['规则项', '当前规则'], [
     ['父体分组', '月份+父ASIN；父ASIN缺失时回退ASIN，再回退源行ID。'],
     ['父体销量', '同一月份+父ASIN内，Q列月销量有效非负值取平均。'],
     ['父体销售额', '同一月份+父ASIN内，T列月销售额($)有效非负值取平均。'],
-    ['BSR汇总', '月份+BSR值，忽略ASIN；同月同BSR的Q/T取平均，再按1—20、21—50、51—100三档。'],
+    ['BSR汇总', '先按月份+BSR值+父ASIN对Q/T取平均，再对父体平均结果求和，最后按1—20、21—50、51—100三档。'],
     ['PP/高客单价', '父体候选标题中的plastic命中率≥50%归PP，其他归高客单价。'],
     ['Genimo', '父体有效品牌中Genimo占多数归Genimo；整体份额与PP内份额分别计算。'],
-    ['MOM', '本月÷去年同月，不减1。'],
-    ['YOY', '本年与上一年共同覆盖月份汇总相除，不减1；2025比较8—12月，2026比较1—7月。'],
+    ['MOM', '本月÷去年同月-1，按百分比显示；没有去年同月基期时留空。'],
+    ['YOY', '本年与上一年共同覆盖月份汇总相除-1，按百分比显示；2025比较8—12月，2026比较1—7月。'],
     ['均价', '加权成交均价=销售额÷销量；空白不补零。'],
     ['利润', '不计算利润；毛利率、FBA、Coupon仅保留源字段回勾。'],
 ], [20, 110])

@@ -41,6 +41,7 @@ const valid = (v) => Number.isFinite(v) && v >= 0;
 const sum = (values) => { const xs = values.filter(Number.isFinite); return xs.length ? xs.reduce((a, b) => a + b, 0) : null; };
 const avg = (values) => { const xs = values.filter(Number.isFinite); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null; };
 const ratio = (a, b) => Number.isFinite(a) && Number.isFinite(b) && b > 0 ? a / b : null;
+const changeRate = (a, b) => { const value = ratio(a, b); return value == null ? null : value - 1; };
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const parseMonth = (file) => { const m = file.match(MONTH_RE); return m ? `${m[1]}${m[2]}` : null; };
 const parseRank = (v) => {
@@ -140,14 +141,14 @@ function addComparisons(rows) {
   const byMonth = new Map(rows.map((r) => [r.month, r]));
   for (const r of rows) {
     const priorYear = byMonth.get(`${Number(r.month.slice(0, 4)) - 1}${r.month.slice(4)}`);
-    r.momSales = ratio(r.sales, priorYear?.sales);
-    r.momRevenue = ratio(r.revenue, priorYear?.revenue);
+    r.momSales = changeRate(r.sales, priorYear?.sales);
+    r.momRevenue = changeRate(r.revenue, priorYear?.revenue);
     const year = Number(r.month.slice(0, 4));
     const monthNumber = Number(r.month.slice(4));
     const currentYtd = rows.filter((x) => Number(x.month.slice(0, 4)) === year && Number(x.month.slice(4)) <= monthNumber && byMonth.has(`${year - 1}${x.month.slice(4)}`));
     const previousYtd = currentYtd.map((x) => byMonth.get(`${year - 1}${x.month.slice(4)}`));
-    r.yoySales = ratio(sum(currentYtd.map((x) => x.sales)), sum(previousYtd.map((x) => x.sales)));
-    r.yoyRevenue = ratio(sum(currentYtd.map((x) => x.revenue)), sum(previousYtd.map((x) => x.revenue)));
+    r.yoySales = changeRate(sum(currentYtd.map((x) => x.sales)), sum(previousYtd.map((x) => x.sales)));
+    r.yoyRevenue = changeRate(sum(currentYtd.map((x) => x.revenue)), sum(previousYtd.map((x) => x.revenue)));
   }
   return rows;
 }
@@ -188,7 +189,7 @@ function annualRows(rows) {
     return {
       year, availableMonths: available.map((r) => r.month), months: common.map((r) => r.month), priorMonths: previous.map((r) => r.month),
       sales, revenue, parentSales: sales, parentRevenue: revenue, priorSales, priorRevenue,
-      yoySales: ratio(sales, priorSales), yoyRevenue: ratio(revenue, priorRevenue), yoyParentSales: ratio(sales, priorSales), yoyParentRevenue: ratio(revenue, priorRevenue),
+      yoySales: changeRate(sales, priorSales), yoyRevenue: changeRate(revenue, priorRevenue), yoyParentSales: changeRate(sales, priorSales), yoyParentRevenue: changeRate(revenue, priorRevenue),
       avgPrice: avg(common.map((r) => r.avgPrice)), weightedPrice: ratio(revenue, sales),
       status: !common.length ? 'NO_BASE' : common.length === 12 ? 'FULL_YEAR' : 'MATCHED_MONTHS'
     };
@@ -196,25 +197,54 @@ function annualRows(rows) {
 }
 
 function buildBsrGroups(observations, parentsByKey, rowFilter = () => true) {
+  // The BSR branch follows the same parent-first rule as the main market branch:
+  // first average each parent within month + BSR value, then sum the parent
+  // averages into the BSR-value result. Raw ASIN observations remain available
+  // for coverage/audit counts and are never used as the final weighting unit.
   const grouped = new Map();
   for (const obs of observations) {
     const parent = parentsByKey.get(`${obs.month}|${obs.parentKey}`);
     if (!parent || !rowFilter(parent)) continue;
-    const key = `${obs.month}|${obs.rank}`;
+    const key = `${obs.month}|${obs.rank}|${obs.parentKey}`;
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push({ ...obs, parent });
   }
-  const rows = [];
+  const parentGroups = [];
   for (const [key, list] of grouped) {
-    const [month, rankText] = key.split('|');
+    const [month, rankText, ...parentParts] = key.split('|');
+    const parentKey = parentParts.join('|');
     const q = list.map((r) => r.sales).filter(valid);
     const t = list.map((r) => r.sourceRevenue).filter(valid);
+    const prices = list.map((r) => r.price).filter(valid);
+    parentGroups.push({
+      month, bsr: Number(rankText), parentKey, observationCount: list.length,
+      qAvg: avg(q), tAvg: avg(t), avgPrice: avg(prices),
+      qValidRows: q.length, tValidRows: t.length,
+      ppObservations: list.filter((r) => r.parent.pp).length,
+      genimoObservations: list.filter((r) => r.parent.genimo).length
+    });
+  }
+  const byBsrValue = new Map();
+  for (const parentGroup of parentGroups) {
+    const key = `${parentGroup.month}|${parentGroup.bsr}`;
+    if (!byBsrValue.has(key)) byBsrValue.set(key, []);
+    byBsrValue.get(key).push(parentGroup);
+  }
+  const rows = [];
+  for (const [key, list] of byBsrValue) {
+    const [month, rankText] = key.split('|');
+    const q = list.map((r) => r.qAvg).filter(Number.isFinite);
+    const t = list.map((r) => r.tAvg).filter(Number.isFinite);
+    const prices = list.map((r) => r.avgPrice).filter(Number.isFinite);
+    const observationCount = sum(list.map((r) => r.observationCount)) ?? 0;
+    const qValidRows = sum(list.map((r) => r.qValidRows)) ?? 0;
+    const tValidRows = sum(list.map((r) => r.tValidRows)) ?? 0;
     rows.push({
-      month, bsr: Number(rankText), tier: tierFor(Number(rankText)), observationCount: list.length,
-      qAvg: avg(q), tAvg: avg(t), avgPrice: avg(list.map((r) => r.price).filter(valid)), weightedPrice: ratio(avg(t), avg(q)),
-      qValidRows: q.length, tValidRows: t.length, qCoverage: ratio(q.length, list.length), tCoverage: ratio(t.length, list.length),
-      ppObservations: list.filter((r) => r.parent.pp).length, genimoObservations: list.filter((r) => r.parent.genimo).length,
-      parentKeys: [...new Set(list.map((r) => r.parentKey))]
+      month, bsr: Number(rankText), tier: tierFor(Number(rankText)), observationCount,
+      qAvg: sum(q), tAvg: sum(t), avgPrice: avg(prices), weightedPrice: ratio(sum(t), sum(q)),
+      qValidRows, tValidRows, qCoverage: ratio(qValidRows, observationCount), tCoverage: ratio(tValidRows, observationCount),
+      parentCount: list.length, parentKeys: list.map((r) => r.parentKey),
+      ppObservations: sum(list.map((r) => r.ppObservations)) ?? 0, genimoObservations: sum(list.map((r) => r.genimoObservations)) ?? 0
     });
   }
   return rows.sort((a, b) => a.month.localeCompare(b.month) || a.bsr - b.bsr);
@@ -278,8 +308,10 @@ export function buildModel() {
     annual[key] = annualRows(summaries[key]);
   }
   // BSR is an independent branch: filter observations by the target business scope
-  // first, then average within month + BSR value. This prevents a mixed group from
-  // leaking observations from another market merely because it shares the same rank.
+  // first, then average within month + BSR value + parent, and sum parent averages
+  // into each BSR value. This prevents a mixed group from leaking observations from
+  // another market merely because it shares the same rank while preserving the
+  // parent-first statistical unit.
   const bsr = Object.fromEntries(Object.entries(categories).map(([key, c]) => [key, buildBsrTiers(buildBsrGroups(observations, parentByKey, c.filter))]));
   const duplicateMap = new Map();
   for (const row of rawRows) if (row.asin) {
@@ -303,11 +335,11 @@ export function buildModel() {
     specVersion: '3.7', batchId: `spec37-${months[0]}-${months.at(-1)}-${sourceHash}`, generatedAt: new Date().toISOString(),
     sourceDir: 'data/raw/0920new', months, firstMonth: months[0], lastMonth: months.at(-1), fileCount: sourceFiles.length,
     rawRowCount: rawRows.length, candidateRowCount: candidateCount, bsrObservationCount: observationCount, parentMonthCount: parentRows.length,
-    analysisOrder: '24个月新源 -> 小类BSR任一有效1—100入池 -> 父体月份+父ASIN的Q/T平均 -> 四部分；BSR支线按月份+BSR值的Q/T平均 -> 三档',
+    analysisOrder: '24个月新源 -> 小类BSR任一有效1—100入池 -> 父体月份+父ASIN的Q/T平均 -> 四部分；BSR支线按月份+BSR值+父ASIN先取Q/T平均，再对父体求和 -> 三档',
     candidateRule: '小类目不参与筛选；小类BSR拆分后任一有效排名1—100入池；多值排名全部保留',
     parentRule: '同一月份+父ASIN内，Q列月销量和T列月销售额分别对有效非负值取算术平均',
-    bsrRule: '同一月份+BSR值内，忽略ASIN，对Q/T分别取平均；头部1—20，中部21—50，尾部51—100；档位为BSR值组平均的平均',
-    momRule: '本月/去年同月', yoyRule: '本年与上一年共同覆盖月份汇总/上一年对应共同覆盖月份汇总',
+    bsrRule: '同一月份+BSR值+父ASIN内，Q/T分别对有效非负值取平均；再对同一月份+BSR值的父体平均结果求和；头部1—20，中部21—50，尾部51—100；档位为BSR值组结果的平均',
+    momRule: '本月/去年同月-1，按百分比显示', yoyRule: '本年与上一年共同覆盖月份汇总相除-1，按百分比显示',
     annualCoverageRule: '2025对2024仅8—12月；2026对2025仅1—7月；不是完整自然年度',
     sourceExclusions: { invalidBsr: sourceFiles.reduce((n, s) => n + s.exclusions.INVALID_BSR, 0), outsideTop100: sourceFiles.reduce((n, s) => n + s.exclusions.OUTSIDE_TOP100, 0) },
     duplicateAsinGroups: duplicateAsins.length,
@@ -326,4 +358,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   console.log(JSON.stringify({ output: OUT_DIR, metadata: model.metadata, sample: model.parentRows.find((p) => p.month === '202607' && p.parentKey === 'B0BM74444Q') ?? null }, null, 2));
 }
 
-export { OUT_DIR, parseRanks, tierFor, aggregateParent, monthSummary, annualRows, ratio };
+export { OUT_DIR, parseRanks, tierFor, aggregateParent, monthSummary, annualRows, ratio, changeRate, buildBsrGroups };

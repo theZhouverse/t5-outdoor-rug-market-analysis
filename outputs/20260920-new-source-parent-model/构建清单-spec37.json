@@ -1,7 +1,7 @@
 {
   "specVersion": "3.7",
   "batchId": "spec37-202408-202607-181203121355",
-  "generatedAt": "2026-09-24T05:49:51.956Z",
+  "generatedAt": "2026-09-28T06:34:38.838Z",
   "sourceDir": "data/raw/0920new",
   "months": [
     "202408",
@@ -36,12 +36,12 @@
   "candidateRowCount": 46780,
   "bsrObservationCount": 46854,
   "parentMonthCount": 1334,
-  "analysisOrder": "24个月新源 -> 小类BSR任一有效1—100入池 -> 父体月份+父ASIN的Q/T平均 -> 四部分；BSR支线按月份+BSR值的Q/T平均 -> 三档",
+  "analysisOrder": "24个月新源 -> 小类BSR任一有效1—100入池 -> 父体月份+父ASIN的Q/T平均 -> 四部分；BSR支线按月份+BSR值+父ASIN先取Q/T平均，再对父体求和 -> 三档",
   "candidateRule": "小类目不参与筛选；小类BSR拆分后任一有效排名1—100入池；多值排名全部保留",
   "parentRule": "同一月份+父ASIN内，Q列月销量和T列月销售额分别对有效非负值取算术平均",
-  "bsrRule": "同一月份+BSR值内，忽略ASIN，对Q/T分别取平均；头部1—20，中部21—50，尾部51—100；档位为BSR值组平均的平均",
-  "momRule": "本月/去年同月",
-  "yoyRule": "本年与上一年共同覆盖月份汇总/上一年对应共同覆盖月份汇总",
+  "bsrRule": "同一月份+BSR值+父ASIN内，Q/T分别对有效非负值取平均；再对同一月份+BSR值的父体平均结果求和；头部1—20，中部21—50，尾部51—100；档位为BSR值组结果的平均",
+  "momRule": "本月/去年同月-1，按百分比显示",
+  "yoyRule": "本年与上一年共同覆盖月份汇总相除-1，按百分比显示",
   "annualCoverageRule": "2025对2024仅8—12月；2026对2025仅1—7月；不是完整自然年度",
   "sourceExclusions": {
     "invalidBsr": 0,
@@ -56,23 +56,23 @@
   "files": [
     {
       "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.html",
-      "bytes": 2576267,
-      "sha256": "931f7dfe88c08ad448e6cdf6d42c8d904f737b89c451765369b47345db557054"
+      "bytes": 2578540,
+      "sha256": "d93192538ddc6f368f3e260b4ab03a580cc1b625a31af6987d451f8600b4f735"
     },
     {
       "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.json",
-      "bytes": 3314153,
-      "sha256": "96ea3191816d71a59a5148c493b0ab80436a823f84a33eaf4dbaa5c51d49456c"
+      "bytes": 3314848,
+      "sha256": "a10a945d5c22cfa05f970d7928b7794d753225be7f8ee94d210835270a8b9fbc"
     },
     {
       "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.md",
-      "bytes": 4288,
-      "sha256": "c72b6fb62d7846348da5841c4574e3a20fd065be0a7e2ceba85bf892c3ed3dc0"
+      "bytes": 4385,
+      "sha256": "befe0fb91827204506a906ec8f96563775a884839487d53586bc1e2ba4ecdd0c"
     },
     {
       "path": "outputs\\20260920-new-source-parent-model\\户外地垫市场分析-SPEC3.7-父体口径.xlsx",
-      "bytes": 8339360,
-      "sha256": "72d19d4fdd1395f8ffc8373f0b0ad593fffc44f58d1a60b2817cece3c4bbe5c6"
+      "bytes": 8338709,
+      "sha256": "fa876f7a4f3b2829aa23569f9d0a04ebce5141aa473ef8db5b13e594d776d36b"
     }
   ]
 }
