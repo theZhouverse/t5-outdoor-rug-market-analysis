@@ -25,7 +25,7 @@
 - `outputs/20260920-new-source-parent-model/公式审计-spec37.json`：独立公式解释器对9,260个保存公式的求值结果，以及Q/T负值、空白和明确0共六类输入扰动结果。
 - `outputs/20260920-new-source-parent-model/构建清单-spec37.json`：本批次核心文件指纹。
 
-线上交付页：<https://thezhouverse.github.io/t5-outdoor-rug-market-analysis/>。`gh-pages`提交为`9350d83bf671582f541181fa10f7ebf886db1faa`；线上HTML与本地LF规范化内容的SHA-256均为`32b788ac8f0186a1da8c4586471440c658a64bcf24d3ba66730cfda9e79edb6e`，线上下载XLSX与本地文件的SHA-256均为`72d19d4fdd1395f8ffc8373f0b0ad593fffc44f58d1a60b2817cece3c4bbe5c6`。
+线上交付页：<https://thezhouverse.github.io/t5-outdoor-rug-market-analysis/>。业务提交为`77ee496`，`gh-pages`提交为`cb9e0d56ea1d656a81f8f304e9d885022502f5d8`；线上HTML按Git LF换行规范化后的SHA-256为`a908460f9f431ac9b0c5c6768773f3f8740ef687054323fc75365c02a5e13133`，线上下载XLSX与本地文件的SHA-256均为`fa876f7a4f3b2829aa23569f9d0a04ebce5141aa473ef8db5b13e594d776d36b`。
 
 旧的 `户外地垫市场分析-SPEC3-父体口径*` 文件保留为历史输出，不能与当前 SPEC 3.7 数字混用。
 
