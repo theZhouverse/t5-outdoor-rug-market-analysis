@@ -48,10 +48,14 @@ function shares() {
 }
 function strategy() {
   const g = currentSummary('genimo'), a = currentSummary('overall'), gp = currentSummary('genimoPP'), p = currentSummary('pp');
+  const overallAnnual = model.annual.overall.at(-1), highAnnual = model.annual.high.at(-1), genimoAnnual = model.annual.genimo.at(-1);
+  const ppMiddle = model.bsr.pp.tiers.middle.at(-1), highMiddle = model.bsr.high.tiers.middle.at(-1);
   return bullets([
     `<b>整体份额：</b>当前 Genimo 销量份额 ${ratioText(a.sales ? g.sales / a.sales : null)}，销售额份额 ${ratioText(a.revenue ? g.revenue / a.revenue : null)}；PP内销量份额 ${ratioText(p.sales ? gp.sales / p.sales : null)}，销售额份额 ${ratioText(p.revenue ? gp.revenue / p.revenue : null)}。`,
-    `<b>测款顺序：</b>先比较 PP、高客单价市场及其 BSR 三档的销量、销售额和百分比变化，再选取同一档位的小批量测试样本。`,
-    '<b>链接规划：</b>当前数据没有预算、转化率和资源约束，先用份额、销量、销售额和BSR档位表现确定优先级，再由业务确定链接数量。',
+    `<b>整体增长建议：</b>${month(a.month)}整体销量YOY ${pctText(a.yoySales)}、销售额YOY ${pctText(a.yoyRevenue)}；${overallAnnual?.year ?? '当前年度'}共同月份累计YOY为销量 ${pctText(overallAnnual?.yoySales)}、销售额 ${pctText(overallAnnual?.yoyRevenue)}。建议继续增长，先以销量+15%、销售额+8%作为业务基准，并按月复核覆盖率、Q/T冲突和价格变化。`,
+    `<b>PP中部链接：</b>优先测试PP中部BSR 21—50；${month(ppMiddle?.month ?? a.month)}该档位值组平均销量YOY ${pctText(ppMiddle?.yoySales)}、销售额YOY ${pctText(ppMiddle?.yoyRevenue)}，加权成交均价 ${money(ppMiddle?.weightedPrice)}。建议小批量新增，并把有销量基础的PP老链接向中部/头部推进；PP业务目标可设为销量+25%、销售额+25%—30%。`,
+    `<b>高客单价链接：</b>当前“高客单价”是非PP补集，不等同真实价格分层；${month(highMiddle?.month ?? a.month)}高客单价整体销量YOY ${pctText(highAnnual?.yoySales)}、销售额YOY ${pctText(highAnnual?.yoyRevenue)}。暂不大规模新增，先优化老链接、验证真实价格带/转化率/毛利；${month(highMiddle?.month ?? a.month)}中部BSR值组平均销售额YOY ${pctText(highMiddle?.yoyRevenue)}，也应以止跌并恢复正增长为阶段目标。`,
+    `<b>Genimo与老链接：</b>${month(g.month)} Genimo销量YOY ${pctText(g.yoySales)}、销售额YOY ${pctText(g.yoyRevenue)}；${genimoAnnual?.year ?? '当前年度'}共同月份累计YOY为销量 ${pctText(genimoAnnual?.yoySales)}、销售额 ${pctText(genimoAnnual?.yoyRevenue)}。优先扩充已有基础的PP老链接，再按份额和BSR测试新链接；绝对新增链接数需结合预算、转化率、毛利和库存确定。`,
     '<b>花型与尺寸：</b>源标题、SKU和参数保留在Excel供人工复核；没有经过完整分类核验的花型结论不写入策略。'
   ]);
 }
